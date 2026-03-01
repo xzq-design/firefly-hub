@@ -50,7 +50,7 @@ class FireflyWSServer:
     async def send_to_client(self, session_id: str, message: dict):
         """向指定 Client 发送消息。"""
         ws = self.clients.get(session_id)
-        if ws and not ws.closed:
+        if ws:
             try:
                 await ws.send(json.dumps(message, ensure_ascii=False))
             except Exception as e:
@@ -61,10 +61,7 @@ class FireflyWSServer:
         disconnected = []
         for session_id, ws in self.clients.items():
             try:
-                if not ws.closed:
-                    await ws.send(json.dumps(message, ensure_ascii=False))
-                else:
-                    disconnected.append(session_id)
+                await ws.send(json.dumps(message, ensure_ascii=False))
             except Exception:
                 disconnected.append(session_id)
         for sid in disconnected:
@@ -76,7 +73,8 @@ class FireflyWSServer:
         """处理单个 WebSocket 连接的完整生命周期。"""
         session_id = str(uuid.uuid4())[:8]
         self.clients[session_id] = ws
-        client_info = f"{ws.remote_address[0]}:{ws.remote_address[1]}"
+        remote = ws.remote_address if ws.remote_address else ('unknown', 0)
+        client_info = f"{remote[0]}:{remote[1]}"
         logger.info(f"[Firefly-Hub] Client 已连接: {client_info} (session={session_id})")
 
         try:
@@ -87,8 +85,10 @@ class FireflyWSServer:
                 except json.JSONDecodeError:
                     logger.warning(f"[Firefly-Hub] 收到无效 JSON (session={session_id})")
                     await self._send_error(session_id, "INVALID_JSON", "消息格式无效，请发送 JSON")
-        except websockets.ConnectionClosed as e:
+        except websockets.exceptions.ConnectionClosed as e:
             logger.info(f"[Firefly-Hub] Client 断开: {client_info} (code={e.code})")
+        except Exception as e:
+            logger.error(f"[Firefly-Hub] 连接异常: {client_info} - {e}")
         finally:
             self.clients.pop(session_id, None)
 

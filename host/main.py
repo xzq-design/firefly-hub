@@ -9,51 +9,40 @@ import uuid
 import time
 import logging
 
-from astrbot.api.star import Context, Star, register
-from astrbot.api.event import filter
+from astrbot.core.star import Star, Context
 
 from .ws_server import FireflyWSServer
 
 logger = logging.getLogger("firefly_hub")
 
 
-@register("firefly_hub", "lonelystar", "Firefly-Hub 自建消息前端平台适配器", "0.1.0")
 class FireflyHub(Star):
     """Firefly-Hub 主插件类，负责 WebSocket 服务端生命周期和消息路由。"""
 
-    def __init__(self, context: Context):
-        super().__init__(context)
+    def __init__(self, context: Context, config: dict = None) -> None:
+        super().__init__(context, config)
         self.ws_server = FireflyWSServer(host="0.0.0.0", port=8765)
         self.ws_server.on_message(self._handle_client_message)
         self._server_task: asyncio.Task = None
 
-    async def _start_ws_server(self):
-        """启动 WebSocket 服务端。"""
+    # ---------- AstrBot 生命周期钩子 ----------
+
+    async def initialize(self) -> None:
+        """当插件被激活时调用，启动 WebSocket 服务端。"""
+        logger.info("[Firefly-Hub] 插件激活中，正在启动 WebSocket Server...")
         try:
             await self.ws_server.start()
+            logger.info("[Firefly-Hub] WebSocket Server 已启动: ws://0.0.0.0:8765")
         except Exception as e:
             logger.error(f"[Firefly-Hub] WebSocket Server 启动失败: {e}")
 
-    async def _stop_ws_server(self):
-        """停止 WebSocket 服务端。"""
+    async def terminate(self) -> None:
+        """当插件被禁用或重载时调用，关闭 WebSocket 服务端。"""
+        logger.info("[Firefly-Hub] 插件卸载中，正在关闭 WebSocket Server...")
         try:
             await self.ws_server.stop()
         except Exception as e:
             logger.error(f"[Firefly-Hub] WebSocket Server 停止失败: {e}")
-
-    # ---------- AstrBot 生命周期钩子 ----------
-
-    async def on_star_loaded(self):
-        """AstrBot 加载插件时调用，启动 WebSocket 服务端。"""
-        logger.info("[Firefly-Hub] 插件加载中...")
-        self._server_task = asyncio.create_task(self._start_ws_server())
-
-    async def on_star_removed(self):
-        """AstrBot 卸载插件时调用，关闭 WebSocket 服务端。"""
-        logger.info("[Firefly-Hub] 插件卸载中...")
-        await self._stop_ws_server()
-        if self._server_task and not self._server_task.done():
-            self._server_task.cancel()
 
     # ---------- 消息处理 ----------
 
