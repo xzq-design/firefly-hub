@@ -1,0 +1,81 @@
+{
+  "project": "Firefly-Hub",
+  "architecture": {
+    "type": "Monorepo or Microservices",
+    "directories": {
+      "host": {
+        "description": "中枢控制端，Python + AstrBot",
+        "sub_dirs": ["core", "auth", "engine", "config"]
+      },
+      "agent": {
+        "description": "指令执行端，Python + OpenClaw + MCP",
+        "sub_dirs": ["executor", "mcp_tools", "cache_mgr"]
+      },
+      "client": {
+        "description": "用户交互端，Flutter",
+        "sub_dirs": ["lib/core", "lib/ui", "lib/models"]
+      },
+      ".firefly_cache": {
+        "description": "本地安全回溯缓存区",
+        "sub_dirs": ["backups", "logs"]
+      }
+    }
+  },
+  "websocket_protocol": {
+    "envelope_structure": {
+      "message_id": "string (UUID)",
+      "type": "string (事件枚举)",
+      "source": "enum (client|host|agent)",
+      "target": "enum (client|host|agent)",
+      "timestamp": "integer (UNIX Timestamp)",
+      "payload": "object (根据type变化)"
+    },
+    "message_types": {
+      "connection": ["PING", "PONG", "AUTH_CONNECT"],
+      "chat": ["CHAT_REQUEST", "CHAT_RESPONSE", "CHAT_STREAM_CHUNK"],
+      "security_auth": ["AUTH_REQUIRED", "AUTH_RESPONSE"],
+      "task_execution": ["TASK_EXECUTE", "TASK_STATUS_UPDATE", "UNDO_REQUEST"],
+      "system": ["SYSTEM_NOTIFICATION", "ERROR_ALERT"]
+    },
+    "examples": {
+      "CHAT_REQUEST": {
+        "message_id": "msg-123",
+        "type": "CHAT_REQUEST",
+        "source": "client",
+        "target": "host",
+        "timestamp": 1700000000,
+        "payload": {
+          "content": "列出当前目录文件"
+        }
+      },
+      "AUTH_REQUIRED": {
+        "message_id": "msg-456",
+        "type": "AUTH_REQUIRED",
+        "source": "host",
+        "target": "client",
+        "timestamp": 1700000100,
+        "payload": {
+          "task_id": "task-789",
+          "action_type": "FILE_MODIFY",
+          "risk_level": "HIGH",
+          "target_path": "e:\\firefly-hub\\readme.md",
+          "description": "准备修改文件...",
+          "diff_preview": "+ 新增内容...",
+          "timeout_seconds": 30
+        }
+      },
+      "AUTH_RESPONSE": {
+        "message_id": "msg-456-reply",
+        "type": "AUTH_RESPONSE",
+        "source": "client",
+        "target": "host",
+        "timestamp": 1700000115,
+        "payload": {
+          "task_id": "task-789",
+          "decision": "APPROVED",
+          "reason": ""
+        }
+      }
+    }
+  }
+}
