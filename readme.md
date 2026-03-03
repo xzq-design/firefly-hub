@@ -17,29 +17,29 @@ QQ 等第三方 IM 平台存在封号风险，消息通道不可控。Firefly-Hu
 
 ```
 ┌─────────────────── 手机 / 平板 ────────────────────┐
-│                                                     │
-│   Flutter Client（Android / iOS / Windows）          │
-│   ├── 极简对话界面                                    │
-│   └── 高危操作审批弹窗 (Human-in-the-loop)            │
-│                                                     │
-└───────────────── WebSocket ──────────────────────────┘
+│                                                   │
+│   Flutter Client（Android / iOS / Windows         │
+│   ├── 极简对话界面                                  │
+│   └── 高危操作审批弹窗 (Human-in-the-loop)           │
+│                                                   │
+└───────────────── WebSocket ───────────────────────┘
                        │
                        ▼
 ┌─────────────────── 电脑端 ──────────────────────────┐
-│                                                     │
-│   Host（AstrBot 平台适配器）                          │
-│   ├── 接收消息 → 提交给 AstrBot（等同 QQ 消息流程）    │
-│   ├── AstrBot 回复 → 转发回 Client                   │
-│   ├── 需要执行操作 → 下发指令给 OpenClaw               │
+│                                                    │
+│   Host（AstrBot 平台适配器）                         │
+│   ├── 接收消息 → 提交给 AstrBot（等同 QQ 消息流程）     │
+│   ├── AstrBot 回复 → 转发回 Client                  │
+│   ├── 需要执行操作 → 下发指令给 OpenClaw              │
 │   └── 高危操作 → 挂起任务，向 Client 发起审批          │
-│                                                     │
-│   OpenClaw（Agent / 执行引擎）                        │
-│   ├── 接收 Host 指令 → 调用 MCP 工具                  │
-│   ├── 只读工具：list_dir / view_file / Notion 查询    │
-│   ├── 写入工具：write_file / git_commit（需审批）      │
-│   └── 执行前自动备份至 .firefly_cache                 │
-│                                                     │
-└─────────────────────────────────────────────────────┘
+│                                                    │
+│   OpenClaw（Agent / 执行引擎）                       │
+│   ├── 接收 Host 指令 → 调用 MCP 工具                 │
+│   ├── 只读工具：list_dir / view_file / Notion 查询   │
+│   ├── 写入工具：write_file / git_commit（需审批）     │
+│   └── 执行前自动备份至 .firefly_cache                │
+│                                                    │
+└────────────────────────────────────────────────────┘
 ```
 
 **核心思路**：手机端只负责聊天和审批，电脑端承担所有算力和执行工作。
@@ -53,7 +53,7 @@ QQ 等第三方 IM 平台存在封号风险，消息通道不可控。Firefly-Hu
 - 将消息以平台消息形式提交给 AstrBot（与 QQ 消息进入的流程完全一致）
 - 接收 AstrBot 的 LLM 回复，转发回 Client
 - 指令分流：判定是否需要调用 OpenClaw，高危操作触发审批拦截
-- Lua 虚拟机：可插拔人格包热更新（内置「流萤」人格，支持自定义）
+- 人格管理：同步 AstrBot 数据库中的人格列表，支持前端直接修改 prompt
 
 ### Agent — 执行引擎（OpenClaw + MCP）
 - 接收 Host 的执行指令，调用 MCP 工具完成实际操作
@@ -85,12 +85,17 @@ WebSocket + 强类型 JSON 自定义协议（详见 [`protocol.json`](./protocol
 
 ## 人格系统
 
-人格包基于 Lua 脚本实现，支持热更新，无需重启即可切换人格。
+人格系统采用**前后端分层设计**：
 
+| 层级 | 管理方 | 内容 |
+|------|--------|------|
+| **后端人格** | AstrBot（数据库） | system_prompt、预设对话、工具权限 |
+| **前端主题** | Flutter Client（本地） | 头像、气泡颜色、主题色、UI 文案 |
+
+- **后端人格**：复用 AstrBot 已有的人格管理系统，支持通过 Client 直接查看和修改 prompt
+- **前端主题**：纯本地美化包，换头像换颜色不需要后端参与
+- **灵活组合**：可以用流萤的 prompt + 自定义主题，或自己写的 prompt + 流萤主题
 - **内置人格**：项目附赠「流萤」人格包，开箱即用
-- **自定义人格**：用户可编写自己的 `.lua` 人格脚本，定义说话风格、情绪表达、称呼方式等
-- **社区共享**：人格包本质是独立的 Lua 文件，方便分享和安装
-- **覆盖安装**：新人格包可直接覆盖现有人格，一键切换
 
 ---
 
@@ -121,22 +126,23 @@ ln -s ./host 你的AstrBot路径/data/plugins/firefly_hub
 
 ## 开发路线
 
-| Phase | 目标 | 内容 |
-|-------|------|------|
-| **1** | 通信基建 | WebSocket 协议 + Host 适配器空壳 + Flutter Client Echo 闭环 |
-| **2** | 接入大脑 | Host 对接 AstrBot（像 QQ 适配器一样） + OpenClaw 集成 + 只读 MCP 工具 |
-| **3** | 灵魂注入 | Human-in-the-loop 审批 + `.firefly_cache` 备份回溯 + 写入类 MCP 工具 |
-| **4** | 体验打磨 | Flutter 动画优化 + 可插拔人格包系统 + 高级 MCP 扩展 |
+| Phase | 目标 | 内容 | 状态 |
+|-------|------|------|------|
+| **1** | 通信基建 | WebSocket 协议 + Host 适配器 + Echo 闭环 | ✅ 完成 |
+| **2** | 接入大脑 | Host 对接 AstrBot LLM + 人格列表同步 | ✅ 完成 |
+| **3** | 接入手脚 | OpenClaw 集成 + 只读 MCP 工具 + Flutter Client | 🚧 进行中 |
+| **4** | 安全护墙 | Human-in-the-loop 审批 + `.firefly_cache` 备份回溯 + 写入类 MCP | 📋 计划 |
+| **5** | 体验打磨 | Flutter 动画优化 + 人格主题包系统 + 高级 MCP 扩展 | 📋 计划 |
 
 ---
 
 ## 未来展望
 
 - **一键安装脚本**：用户只需填入 AstrBot 路径等必填项，自动完成所有配置
-- **人格包市场**：社区共享人格包，一键下载安装
+- **人格包市场**：社区共享人格 + 主题包，一键下载安装
 - **端到端加密**：可选开启 Client ↔ Host 通信加密（遵守相关法律法规）
 - **多并行 Agent**：多开 OpenClaw 实例，并行处理不同任务
-- **移动端 Agent**：当手机性能允许时，OpenClaw 也可跑在移动端，实现全移动化
+- **移动端 Agent**：当手机性能允许时，OpenClaw 也可跑在移动端
 
 ---
 
@@ -144,14 +150,19 @@ ln -s ./host 你的AstrBot路径/data/plugins/firefly_hub
 
 ```
 firefly-hub/
-├── host/                # AstrBot 平台适配器 (Python)
-│   └── personas/        # 人格包目录
-│       └── firefly.lua  # 内置流萤人格（示例）
-├── agent/               # OpenClaw + MCP 工具
-├── client/              # Flutter 跨平台客户端
-├── .firefly_cache/      # 安全备份缓存（自动生成）
-├── protocol.json        # 通讯协议定义
-├── protocol_spec.md     # 协议详细说明文档
+├── host/                    # AstrBot 平台适配器 (Python)
+│   ├── main.py              # Star 壳 + Platform 适配器入口
+│   ├── ws_server.py         # WebSocket Server
+│   ├── firefly_event.py     # 重写 send() 实现 LLM 回复转发
+│   ├── metadata.yaml        # 插件元数据
+│   └── requirements.txt     # 依赖
+├── agent/                   # OpenClaw + MCP 工具（Phase 3+）
+├── client/                  # Flutter 跨平台客户端（Phase 3+）
+├── docs/                    # 开发笔记
+├── protocol.json            # 通讯协议定义
+├── protocol_spec.md         # 协议说明文档
+├── test_echo.py             # 测试脚本
+├── LICENSE                  # GPL-3.0
 └── readme.md
 ```
 

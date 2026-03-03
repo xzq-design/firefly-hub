@@ -1,1 +1,1 @@
-from .main import FireflyHub
+from .main import FireflyHub, FireflyHubAdapter

@@ -1,109 +1,222 @@
 """
-Firefly-Hub AstrBot 插件入口
-作为 AstrBot 的自定义平台适配器，同时启动 WebSocket Server 对接 Flutter Client。
-
-Phase 1: Echo 模式 —— 收到 CHAT_REQUEST 后原样返回，不接 LLM。
+Firefly-Hub AstrBot 平台适配器
+作为 AstrBot 的自定义消息平台，替代 QQ 对接 AstrBot。
+WebSocket Client 的消息通过此适配器进入 AstrBot 的 LLM 管道。
 """
 import asyncio
-import uuid
 import time
+import uuid
 import logging
+from collections.abc import Coroutine
+from typing import Any
 
-from astrbot.core.star import Star, Context
+from astrbot.core import db_helper
+
+from astrbot.core.platform import (
+    AstrBotMessage,
+    MessageMember,
+    MessageType,
+    Platform,
+    PlatformMetadata,
+)
+from astrbot.core.platform.astr_message_event import MessageSesion
+from astrbot.core.platform.register import register_platform_adapter
+from astrbot.core.message.message_event_result import MessageChain
+from astrbot.core.message.components import Plain
+from astrbot.core.star import Star
 
 from .ws_server import FireflyWSServer
+from .firefly_event import FireflyMessageEvent
 
 logger = logging.getLogger("firefly_hub")
 
 
 class FireflyHub(Star):
-    """Firefly-Hub 主插件类，负责 WebSocket 服务端生命周期和消息路由。"""
+    """AstrBot 插件壳。
 
-    def __init__(self, context: Context, config: dict = None) -> None:
-        super().__init__(context, config)
-        self.ws_server = FireflyWSServer(host="0.0.0.0", port=8765)
+    star_manager 要求 plugins 目录下必须有 Star 子类。
+    真正的逻辑在 FireflyHubAdapter (Platform) 中。
+    """
+    pass
+
+
+@register_platform_adapter(
+    adapter_name="firefly_hub",
+    desc="Firefly-Hub 自建消息前端平台适配器",
+    adapter_display_name="Firefly-Hub",
+    default_config_tmpl={
+        "type": "firefly_hub",
+        "enable": True,
+        "id": "firefly_hub",
+        "ws_host": "0.0.0.0",
+        "ws_port": 8765,
+    },
+    support_streaming_message=True,
+)
+class FireflyHubAdapter(Platform):
+    """Firefly-Hub 平台适配器。
+
+    功能：
+    1. 启动 WebSocket Server，接收 Flutter Client 连接
+    2. 将 Client 消息转为 AstrBotMessage，注入 AstrBot 事件队列
+    3. AstrBot 处理后通过 FireflyMessageEvent.send() 回复给 Client
+    """
+
+    def __init__(
+        self,
+        platform_config: dict,
+        platform_settings: dict,
+        event_queue: asyncio.Queue,
+    ) -> None:
+        super().__init__(platform_config, event_queue)
+
+        self.settings = platform_settings
+        ws_host = platform_config.get("ws_host", "0.0.0.0")
+        ws_port = platform_config.get("ws_port", 8765)
+
+        self.ws_server = FireflyWSServer(host=ws_host, port=ws_port)
         self.ws_server.on_message(self._handle_client_message)
-        self._server_task: asyncio.Task = None
 
-    # ---------- AstrBot 生命周期钩子 ----------
+        self.metadata = PlatformMetadata(
+            name="firefly_hub",
+            description="Firefly-Hub 自建消息前端",
+            id=platform_config.get("id", "firefly_hub"),
+            adapter_display_name="Firefly-Hub",
+            support_streaming_message=True,
+            support_proactive_message=True,
+        )
 
-    async def initialize(self) -> None:
-        """当插件被激活时调用，启动 WebSocket 服务端。"""
-        logger.info("[Firefly-Hub] 插件激活中，正在启动 WebSocket Server...")
+        self._shutdown_event = asyncio.Event()
+
+    def run(self) -> Coroutine[Any, Any, None]:
+        """返回平台运行协程，AstrBot 会将其作为 asyncio.Task 启动。"""
+        return self._run()
+
+    async def _run(self) -> None:
+        """启动 WebSocket Server 并等待关闭信号。"""
         try:
             await self.ws_server.start()
-            logger.info("[Firefly-Hub] WebSocket Server 已启动: ws://0.0.0.0:8765")
+            self.status = __import__(
+                "astrbot.core.platform.platform", fromlist=["PlatformStatus"]
+            ).PlatformStatus.RUNNING
+            logger.info("[Firefly-Hub] 平台适配器已启动")
+            await self._shutdown_event.wait()
         except Exception as e:
-            logger.error(f"[Firefly-Hub] WebSocket Server 启动失败: {e}")
+            logger.error(f"[Firefly-Hub] 平台适配器启动失败: {e}")
+            raise
 
     async def terminate(self) -> None:
-        """当插件被禁用或重载时调用，关闭 WebSocket 服务端。"""
-        logger.info("[Firefly-Hub] 插件卸载中，正在关闭 WebSocket Server...")
-        try:
-            await self.ws_server.stop()
-        except Exception as e:
-            logger.error(f"[Firefly-Hub] WebSocket Server 停止失败: {e}")
+        """关闭平台适配器。"""
+        logger.info("[Firefly-Hub] 平台适配器关闭中...")
+        self._shutdown_event.set()
+        await self.ws_server.stop()
 
-    # ---------- 消息处理 ----------
+    def meta(self) -> PlatformMetadata:
+        """返回平台元数据。"""
+        return self.metadata
 
-    async def _handle_client_message(self, message: dict, session_id: str):
-        """
-        处理来自 Flutter Client 的业务消息。
-        Phase 1: Echo 模式，原样返回用户消息。
-        Phase 2+: 将消息提交给 AstrBot LLM 管道处理。
-        """
+    async def send_by_session(
+        self,
+        session: MessageSesion,
+        message_chain: MessageChain,
+    ) -> None:
+        """通过会话发送主动消息（插件主动推送）。"""
+        # 从 session_id 中提取 ws_session_id
+        # 格式: firefly_hub!user!{ws_session_id}
+        parts = session.session_id.split("!")
+        if len(parts) >= 3:
+            ws_session_id = parts[2]
+        else:
+            ws_session_id = session.session_id
+
+        text_parts = []
+        for comp in message_chain.chain:
+            if isinstance(comp, Plain):
+                text_parts.append(comp.text)
+
+        if text_parts:
+            msg = {
+                "message_id": str(uuid.uuid4())[:8],
+                "type": "CHAT_RESPONSE",
+                "source": "host",
+                "target": "client",
+                "timestamp": int(time.time() * 1000),
+                "payload": {
+                    "content": "".join(text_parts),
+                    "status": "success",
+                    "persona": "default",
+                },
+            }
+            await self.ws_server.send_to_client(ws_session_id, msg)
+
+        await super().send_by_session(session, message_chain)
+
+    # ---------- WebSocket 消息处理 ----------
+
+    async def _handle_client_message(self, message: dict, ws_session_id: str) -> None:
+        """处理从 WebSocket Client 收到的业务消息。"""
         msg_type = message.get("type", "")
 
         if msg_type == "CHAT_REQUEST":
-            await self._handle_chat_request(message, session_id)
+            await self._handle_chat_request(message, ws_session_id)
         elif msg_type == "PERSONA_SWITCH":
-            await self._handle_persona_switch(message, session_id)
+            await self._handle_persona_switch(message, ws_session_id)
         elif msg_type == "PERSONA_LIST":
-            await self._handle_persona_list(message, session_id)
-        elif msg_type == "UNDO_REQUEST":
-            # Phase 4 实现
-            logger.info(f"[Firefly-Hub] 收到撤销请求: {message.get('payload', {}).get('task_id')}")
+            await self._handle_persona_list(message, ws_session_id)
         else:
             logger.warning(f"[Firefly-Hub] 未知消息类型: {msg_type}")
 
-    async def _handle_chat_request(self, message: dict, session_id: str):
+    async def _handle_chat_request(self, message: dict, ws_session_id: str) -> None:
         """
-        处理 CHAT_REQUEST。
-        Phase 1: Echo —— 直接把用户发的内容原样返回。
-        TODO Phase 2: 将消息提交给 AstrBot 的 LLM 管道。
+        处理 CHAT_REQUEST：
+        1. 构造 AstrBotMessage
+        2. 包装为 FireflyMessageEvent
+        3. commit_event() 注入 AstrBot 事件队列
+        4. AstrBot 自动调 LLM → 调用 event.send() → WebSocket 回传
         """
         payload = message.get("payload", {})
         user_content = payload.get("content", "")
-        msg_id = message.get("message_id", str(uuid.uuid4()))
+        msg_id = message.get("message_id", str(uuid.uuid4())[:8])
+        context_id = payload.get("context_id", ws_session_id)
 
-        logger.info(f"[Firefly-Hub] 收到消息 (session={session_id}): {user_content}")
+        logger.info(f"[Firefly-Hub] 收到消息 (session={ws_session_id}): {user_content}")
 
-        # Phase 1: Echo 响应
-        response = {
-            "message_id": msg_id,
-            "type": "CHAT_RESPONSE",
-            "source": "host",
-            "target": "client",
-            "timestamp": int(time.time() * 1000),
-            "payload": {
-                "content": f"[Echo] {user_content}",
-                "status": "success",
-                "persona": "default"
-            }
-        }
+        # 1. 构造 AstrBotMessage（和 WebChatAdapter 做法一致）
+        abm = AstrBotMessage()
+        abm.self_id = "firefly_hub"
+        abm.sender = MessageMember(user_id=ws_session_id, nickname="开拓者")
+        abm.type = MessageType.FRIEND_MESSAGE
+        abm.session_id = f"firefly_hub!{ws_session_id}!{context_id}"
+        abm.message_id = msg_id
+        abm.message = [Plain(user_content)]
+        abm.message_str = user_content
+        abm.raw_message = message
+        abm.timestamp = int(time.time())
 
-        await self.ws_server.send_to_client(session_id, response)
+        # 2. 包装为 FireflyMessageEvent
+        event = FireflyMessageEvent(
+            message_str=user_content,
+            message_obj=abm,
+            platform_meta=self.metadata,
+            session_id=abm.session_id,
+            ws_server=self.ws_server,
+            ws_session_id=ws_session_id,
+        )
 
-    async def _handle_persona_switch(self, message: dict, session_id: str):
-        """处理人格切换请求。Phase 1: 仅返回确认。"""
+        # 3. 注入 AstrBot 事件队列（EventBus 会自动处理、调 LLM、调 event.send()）
+        self.commit_event(event)
+        logger.info(f"[Firefly-Hub] 事件已提交到 AstrBot 队列 (msg_id={msg_id})")
+
+    async def _handle_persona_switch(self, message: dict, ws_session_id: str) -> None:
+        """处理人格切换请求。"""
         payload = message.get("payload", {})
         persona_id = payload.get("persona_id", "default")
         persona_name = payload.get("persona_name", "默认")
 
         logger.info(f"[Firefly-Hub] 切换人格: {persona_name} ({persona_id})")
 
-        await self.ws_server.send_to_client(session_id, {
-            "message_id": message.get("message_id", str(uuid.uuid4())),
+        await self.ws_server.send_to_client(ws_session_id, {
+            "message_id": message.get("message_id", str(uuid.uuid4())[:8]),
             "type": "PERSONA_SWITCH",
             "source": "host",
             "target": "client",
@@ -111,32 +224,36 @@ class FireflyHub(Star):
             "payload": {
                 "persona_id": persona_id,
                 "persona_name": persona_name,
-                "status": "switched"
-            }
+                "status": "switched",
+            },
         })
 
-    async def _handle_persona_list(self, message: dict, session_id: str):
-        """返回可用人格列表。Phase 1: 返回内置人格。"""
-        await self.ws_server.send_to_client(session_id, {
-            "message_id": message.get("message_id", str(uuid.uuid4())),
+    async def _handle_persona_list(self, message: dict, ws_session_id: str) -> None:
+        """返回 AstrBot 中已有的人格列表。"""
+        try:
+            personas = await db_helper.get_personas()
+            persona_list = []
+            for p in personas:
+                persona_list.append({
+                    "id": p.persona_id,
+                    "name": p.persona_id,  # AstrBot 的 persona_id 就是名称
+                    "system_prompt_preview": (p.system_prompt[:200] + "...") if len(p.system_prompt) > 200 else p.system_prompt,
+                    "has_begin_dialogs": bool(p.begin_dialogs),
+                    "tools": p.tools,
+                    "skills": p.skills,
+                })
+            logger.info(f"[Firefly-Hub] 返回 {len(persona_list)} 个人格")
+        except Exception as e:
+            logger.error(f"[Firefly-Hub] 读取人格列表失败: {e}")
+            persona_list = []
+
+        await self.ws_server.send_to_client(ws_session_id, {
+            "message_id": message.get("message_id", str(uuid.uuid4())[:8]),
             "type": "PERSONA_LIST",
             "source": "host",
             "target": "client",
             "timestamp": int(time.time() * 1000),
             "payload": {
-                "personas": [
-                    {
-                        "id": "default",
-                        "name": "默认助手",
-                        "author": "系统",
-                        "version": "1.0"
-                    },
-                    {
-                        "id": "firefly",
-                        "name": "流萤",
-                        "author": "官方",
-                        "version": "1.0"
-                    }
-                ]
-            }
+                "personas": persona_list,
+            },
         })

@@ -55,27 +55,30 @@ async def test_echo():
         assert resp["type"] == "PONG"
         print("✅ 心跳正常")
 
-        # 3. 测试 CHAT_REQUEST Echo
-        print("\n--- 测试 CHAT_REQUEST Echo ---")
+        # 3. 测试 CHAT_REQUEST → LLM 回复
+        print("\n--- 测试 CHAT_REQUEST (LLM) ---")
         test_content = "你好，流萤！帮我看看项目文件。"
         await ws.send(make_message("CHAT_REQUEST", {
             "content": test_content,
             "context_id": "test-session"
         }))
-        resp = json.loads(await ws.recv())
+        resp = json.loads(await asyncio.wait_for(ws.recv(), timeout=30))
         print(f"收到: {json.dumps(resp, indent=2, ensure_ascii=False)}")
         assert resp["type"] == "CHAT_RESPONSE"
         assert resp["payload"]["status"] == "success"
-        assert test_content in resp["payload"]["content"]
-        print("✅ Echo 响应正常")
+        assert len(resp["payload"]["content"]) > 0
+        print(f"✅ LLM 回复正常 ({len(resp['payload']['content'])} 字)")
 
-        # 4. 测试 PERSONA_LIST
+        # 4. 测试 PERSONA_LIST（从 AstrBot 数据库读取）
         print("\n--- 测试 PERSONA_LIST ---")
         await ws.send(make_message("PERSONA_LIST", {}))
         resp = json.loads(await ws.recv())
-        print(f"收到: {json.dumps(resp, indent=2, ensure_ascii=False)}")
+        personas = resp["payload"]["personas"]
+        print(f"收到 {len(personas)} 个人格:")
+        for p in personas:
+            print(f"  - {p['id']}: {p.get('system_prompt_preview', '')[:60]}...")
         assert resp["type"] == "PERSONA_LIST"
-        assert len(resp["payload"]["personas"]) >= 1
+        assert len(personas) >= 1
         print("✅ 人格列表正常")
 
         # 5. 测试 PERSONA_SWITCH
