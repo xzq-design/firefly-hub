@@ -138,6 +138,12 @@ class WsService extends ChangeNotifier {
     notifyListeners();
   }
 
+  void removeMessages(Set<String> messageIds) {
+    if (messageIds.isEmpty) return;
+    _messages.removeWhere((m) => messageIds.contains(m.id));
+    notifyListeners();
+  }
+
   void _onError(Object error) {
     debugPrint('[WS] 错误: $error');
     _handleDisconnect();

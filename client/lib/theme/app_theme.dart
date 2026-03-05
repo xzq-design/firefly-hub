@@ -39,7 +39,7 @@ class AppTheme {
   }
 }
 
-/// 自定义颜色扩展，在 widget 中用 Theme.of(context).extension<LumiColors>()!.xxx 访问。
+/// 自定义颜色扩展，在 widget 中用 Theme.of(context).extension(LumiColors)!.xxx 访问。
 class LumiColors extends ThemeExtension<LumiColors> {
   final Color sidebar;
   final Color bubbleThem;

@@ -6,6 +6,7 @@ class ChatMessage {
   final MessageSender sender;
   final DateTime time;
   final bool isTyping; // AI 正在输入中的占位
+  final bool isSelected; // 是否被选中 (用于多选)
 
   ChatMessage({
     required this.id,
@@ -13,15 +14,17 @@ class ChatMessage {
     required this.sender,
     required this.time,
     this.isTyping = false,
+    this.isSelected = false,
   });
 
-  ChatMessage copyWith({String? content, bool? isTyping}) {
+  ChatMessage copyWith({String? content, bool? isTyping, bool? isSelected}) {
     return ChatMessage(
       id: id,
       content: content ?? this.content,
       sender: sender,
       time: time,
       isTyping: isTyping ?? this.isTyping,
+      isSelected: isSelected ?? this.isSelected,
     );
   }
 }

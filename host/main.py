@@ -26,7 +26,7 @@ from astrbot.core.message.components import Plain
 from astrbot.core.star import Star
 
 from .ws_server import LumiWSServer
-from .firefly_event import LumiMessageEvent
+from .lumi_event import LumiMessageEvent
 
 logger = logging.getLogger("lumi_hub")
 
@@ -59,7 +59,7 @@ class LumiHubAdapter(Platform):
     功能：
     1. 启动 WebSocket Server，接收 Flutter Client 连接
     2. 将 Client 消息转为 AstrBotMessage，注入 AstrBot 事件队列
-    3. AstrBot 处理后通过 FireflyMessageEvent.send() 回复给 Client
+    3. AstrBot 处理后通过 LumiMessageEvent.send() 回复给 Client
     """
 
     def __init__(
@@ -122,7 +122,7 @@ class LumiHubAdapter(Platform):
     ) -> None:
         """通过会话发送主动消息（插件主动推送）。"""
         # 从 session_id 中提取 ws_session_id
-        # 格式: firefly_hub!user!{ws_session_id}
+        # 格式: lumi_hub!user!{ws_session_id}
         parts = session.session_id.split("!")
         if len(parts) >= 3:
             ws_session_id = parts[2]
@@ -170,7 +170,7 @@ class LumiHubAdapter(Platform):
         """
         处理 CHAT_REQUEST：
         1. 构造 AstrBotMessage
-        2. 包装为 FireflyMessageEvent
+        2. 包装为 LumiMessageEvent
         3. commit_event() 注入 AstrBot 事件队列
         4. AstrBot 自动调 LLM → 调用 event.send() → WebSocket 回传
         """
@@ -183,18 +183,18 @@ class LumiHubAdapter(Platform):
 
         # 1. 构造 AstrBotMessage（和 WebChatAdapter 做法一致）
         abm = AstrBotMessage()
-        abm.self_id = "firefly_hub"
+        abm.self_id = "lumi_hub"
         abm.sender = MessageMember(user_id=ws_session_id, nickname="开拓者")
         abm.type = MessageType.FRIEND_MESSAGE
-        abm.session_id = f"firefly_hub!{ws_session_id}!{context_id}"
+        abm.session_id = f"lumi_hub!{ws_session_id}!{context_id}"
         abm.message_id = msg_id
         abm.message = [Plain(user_content)]
         abm.message_str = user_content
         abm.raw_message = message
         abm.timestamp = int(time.time())
 
-        # 2. 包装为 FireflyMessageEvent
-        event = FireflyMessageEvent(
+        # 2. 包装为 LumiMessageEvent
+        event = LumiMessageEvent(
             message_str=user_content,
             message_obj=abm,
             platform_meta=self.metadata,
