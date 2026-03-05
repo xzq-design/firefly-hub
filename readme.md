@@ -10,7 +10,7 @@
 
 ## 为什么做这个？
 
-QQ 等第三方 IM 平台存在封号风险，消息通道不可控。Firefly-Hub 自建消息前端，Host 作为 AstrBot 的**自定义平台适配器**（与 QQ 适配器同级），从根本上消除平台依赖——你的对话，你做主。
+QQ 等第三方 IM 平台存在封号风险，消息通道不可控。Lumi-Hub 自建消息前端，Host 作为 AstrBot 的**自定义平台适配器**（与 QQ 适配器同级），从根本上消除平台依赖——你的对话，你做主。
 
 ---
 
@@ -39,7 +39,7 @@ QQ 等第三方 IM 平台存在封号风险，消息通道不可控。Firefly-Hu
 │   ├── 接收 Host 指令 → 调用 MCP 工具                 │
 │   ├── 只读工具：list_dir / view_file / Notion 查询   │
 │   ├── 写入工具：write_file / git_commit（需审批）     │
-│   └── 执行前自动备份至 .firefly_cache                │
+│   └── 执行前自动备份至 .Lumi_cache                │
 │                                                    │
 └────────────────────────────────────────────────────┘
 ```
@@ -59,7 +59,7 @@ QQ 等第三方 IM 平台存在封号风险，消息通道不可控。Firefly-Hu
 
 ### Agent — 执行引擎（OpenClaw + MCP）
 - 接收 Host 的执行指令，调用 MCP 工具完成实际操作
-- 写操作前强制触发 `.firefly_cache` 静默备份
+- 写操作前强制触发 `.Lumi_cache` 静默备份
 - 支持一键撤销（Undo）
 
 ### Client — 自建聊天前端（Flutter）
@@ -106,7 +106,7 @@ WebSocket + 强类型 JSON 自定义协议（详见 [`protocol.json`](./protocol
 
 ## 安全机制
 
-- **执行前备份**：每次修改前自动生成带时间戳的 `.bak` 文件至 `.firefly_cache/backups/`
+- **执行前备份**：每次修改前自动生成带时间戳的 `.bak` 文件至 `.Lumi_cache/backups/`
 - **一键撤销**：用备份覆盖回原路径
 - **定期清理**：以当前人格口吻提醒用户清理缓存，拒绝堆积数字垃圾
 - **自然语言触发**：如 "帮我清理一下缓存"
@@ -119,10 +119,10 @@ WebSocket + 强类型 JSON 自定义协议（详见 [`protocol.json`](./protocol
 
 ```bash
 # Windows
-mklink /D "你的AstrBot路径\data\plugins\firefly_hub" "本仓库路径\host"
+mklink /D "你的AstrBot路径\data\plugins\Lumi_hub" "本仓库路径\host"
 
 # Linux / macOS
-ln -s ./host 你的AstrBot路径/data/plugins/firefly_hub
+ln -s ./host 你的AstrBot路径/data/plugins/Lumi_hub
 ```
 
 > 后续会提供一键安装脚本 `install.bat` / `install.sh`，填入必要信息即可自动完成配置。
@@ -137,7 +137,7 @@ ln -s ./host 你的AstrBot路径/data/plugins/firefly_hub
 | **2** | 接入大脑 | Host 对接 AstrBot LLM + 人格列表同步 | ✅ 完成 |
 | **3** | Flutter 客户端 | Telegram 风格 UI + WebSocket 全双工 + 字体切换 + 深浅色自适应 | ✅ 完成 |
 | **4** | 接入手脚 | OpenClaw 集成 + 只读 MCP 工具 | 🚧 进行中 |
-| **5** | 安全护墙 | Human-in-the-loop 审批 + `.firefly_cache` 备份回溯 + 写入类 MCP | 📋 计划 |
+| **5** | 安全护墙 | Human-in-the-loop 审批 + `.Lumi_cache` 备份回溯 + 写入类 MCP | 📋 计划 |
 | **6** | 体验打磨 | 人格/主题切换 UI + 消息动画 + 高级 MCP 扩展 | 📋 计划 |
 
 ---
@@ -155,11 +155,11 @@ ln -s ./host 你的AstrBot路径/data/plugins/firefly_hub
 ## 工程目录
 
 ```
-firefly-hub/
+Lumi-hub/
 ├── host/                    # AstrBot 平台适配器 (Python)
 │   ├── main.py              # Star 壳 + Platform 适配器入口
 │   ├── ws_server.py         # WebSocket Server
-│   ├── firefly_event.py     # 重写 send() 实现 LLM 回复转发
+│   ├── Lumi_event.py     # 重写 send() 实现 LLM 回复转发
 │   ├── metadata.yaml        # 插件元数据 v0.2.0
 │   └── __init__.py
 ├── client/                  # Flutter Windows 客户端

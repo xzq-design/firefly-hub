@@ -1,5 +1,5 @@
 {
-    "project": "Firefly-Hub",
+    "project": "Lumi-Hub",
     "version": "0.1.0",
     "description": "替代 QQ 的自建消息前端，对接 AstrBot + OpenClaw + MCP",
     "architecture": {
@@ -31,7 +31,7 @@
                     "lib/models"
                 ]
             },
-            ".firefly_cache": {
+            ".lumi_cache": {
                 "description": "安全备份缓存区 (由 Agent 管理)",
                 "sub_dirs": [
                     "backups",
@@ -156,7 +156,7 @@
                 "payload": {
                     "content": "目录下目前有 readme.md 和 protocol.json 两个文件。",
                     "status": "success",
-                    "persona": "firefly"
+                    "persona": "lumi"
                 }
             },
             "AUTH_REQUIRED": {
@@ -169,7 +169,7 @@
                     "task_id": "task-789",
                     "action_type": "FILE_MODIFY",
                     "risk_level": "HIGH",
-                    "target_path": "e:\\firefly-hub\\readme.md",
+                    "target_path": "e:\\Lumi-Hub\\readme.md",
                     "description": "准备修改 readme.md，添加法律声明章节",
                     "diff_preview": "@@ -150,3 +150,20 @@\n+ ## 法律声明\n+ ...",
                     "tool_name": "write_file",
@@ -207,7 +207,7 @@
                 "target": "host",
                 "timestamp": 1700000200000,
                 "payload": {
-                    "persona_id": "firefly",
+                    "persona_id": "lumi",
                     "persona_name": "流萤"
                 }
             },

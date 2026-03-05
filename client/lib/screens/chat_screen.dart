@@ -50,7 +50,7 @@ class _ChatScreenState extends State<ChatScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final colors = Theme.of(context).extension<FireflyColors>()!;
+    final colors = Theme.of(context).extension<LumiColors>()!;
     final ws = context.watch<WsService>();
 
     // 消息更新时滚到底部
@@ -98,7 +98,7 @@ class _ChatScreenState extends State<ChatScreen> {
 // ─── 左侧栏 ─────────────────────────────────────────────────────────────────
 
 class _Sidebar extends StatelessWidget {
-  final FireflyColors colors;
+  final LumiColors colors;
   final WsService ws;
 
   const _Sidebar({required this.colors, required this.ws});
@@ -197,7 +197,7 @@ class _ContactTile extends StatelessWidget {
   final String name;
   final String subtitle;
   final bool isSelected;
-  final FireflyColors colors;
+  final LumiColors colors;
   final WsStatus status;
 
   const _ContactTile({
@@ -271,7 +271,7 @@ class _ContactTile extends StatelessWidget {
 // ─── 顶部栏 ─────────────────────────────────────────────────────────────────
 
 class _TopBar extends StatelessWidget {
-  final FireflyColors colors;
+  final LumiColors colors;
   final WsService ws;
 
   const _TopBar({required this.colors, required this.ws});
@@ -342,7 +342,7 @@ class _TopBar extends StatelessWidget {
 class _MessageList extends StatelessWidget {
   final List<ChatMessage> messages;
   final ScrollController scroll;
-  final FireflyColors colors;
+  final LumiColors colors;
 
   const _MessageList({
     required this.messages,
@@ -369,7 +369,7 @@ class _MessageList extends StatelessWidget {
 
 class _BubbleItem extends StatelessWidget {
   final ChatMessage msg;
-  final FireflyColors colors;
+  final LumiColors colors;
 
   const _BubbleItem({required this.msg, required this.colors});
 
@@ -535,7 +535,7 @@ class _TypingIndicatorState extends State<_TypingIndicator>
 class _InputBar extends StatefulWidget {
   final TextEditingController controller;
   final FocusNode focusNode;
-  final FireflyColors colors;
+  final LumiColors colors;
   final VoidCallback onSend;
   final bool enabled;
 

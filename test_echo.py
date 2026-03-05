@@ -3,7 +3,7 @@ Firefly-Hub Echo 测试脚本
 用于验证 Host WebSocket Server 是否正常工作。
 
 使用方法：
-1. 确保 AstrBot 已启动并加载了 firefly_hub 插件
+1. 确保 AstrBot 已启动并加载了 lumi_hub 插件
 2. 运行此脚本: python test_echo.py
 """
 import asyncio

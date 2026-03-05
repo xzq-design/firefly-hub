@@ -1,5 +1,5 @@
-name: firefly_client
-description: "Firefly-Hub 自建消息前端客户端"
+name: lumi_client
+description: "Lumi-Hub 自建消息前端客户端"
 publish_to: 'none'
 
 # The following defines the version and build number for your application.

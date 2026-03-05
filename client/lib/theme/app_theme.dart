@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 
 class AppTheme {
-  // 颜色直接在 FireflyColors factory 中内联定义
+  // 颜色直接在 LumiColors factory 中内联定义
   static const _darkAccent = Color(0xFF5BACF0);
   static const _darkText = Color(0xFFEEF2F6);
   static const _darkBg = Color(0xFF17212B);
@@ -20,7 +20,7 @@ class AppTheme {
         onSurface: _darkText,
       ),
       fontFamily: fontFamily,
-      extensions: [FireflyColors.dark()],
+      extensions: [LumiColors.dark()],
     );
   }
 
@@ -34,13 +34,13 @@ class AppTheme {
         onSurface: _lightText,
       ),
       fontFamily: fontFamily,
-      extensions: [FireflyColors.light()],
+      extensions: [LumiColors.light()],
     );
   }
 }
 
-/// 自定义颜色扩展，在 widget 中用 Theme.of(context).extension<FireflyColors>()!.xxx 访问。
-class FireflyColors extends ThemeExtension<FireflyColors> {
+/// 自定义颜色扩展，在 widget 中用 Theme.of(context).extension<LumiColors>()!.xxx 访问。
+class LumiColors extends ThemeExtension<LumiColors> {
   final Color sidebar;
   final Color bubbleThem;
   final Color bubbleMe;
@@ -51,7 +51,7 @@ class FireflyColors extends ThemeExtension<FireflyColors> {
   final Color onBubbleMe;
   final Color onBubbleThem;
 
-  const FireflyColors({
+  const LumiColors({
     required this.sidebar,
     required this.bubbleThem,
     required this.bubbleMe,
@@ -63,7 +63,7 @@ class FireflyColors extends ThemeExtension<FireflyColors> {
     required this.onBubbleThem,
   });
 
-  factory FireflyColors.dark() => const FireflyColors(
+  factory LumiColors.dark() => const LumiColors(
     sidebar: Color(0xFF0E1621),
     bubbleThem: Color(0xFF182533),
     bubbleMe: Color(0xFF2B5278),
@@ -75,7 +75,7 @@ class FireflyColors extends ThemeExtension<FireflyColors> {
     onBubbleThem: Color(0xFFEEF2F6),
   );
 
-  factory FireflyColors.light() => const FireflyColors(
+  factory LumiColors.light() => const LumiColors(
     sidebar: Color(0xFFFFFFFF),
     bubbleThem: Color(0xFFFFFFFF),
     bubbleMe: Color(0xFFEFFBFF),
@@ -88,7 +88,7 @@ class FireflyColors extends ThemeExtension<FireflyColors> {
   );
 
   @override
-  FireflyColors copyWith({
+  LumiColors copyWith({
     Color? sidebar,
     Color? bubbleThem,
     Color? bubbleMe,
@@ -99,7 +99,7 @@ class FireflyColors extends ThemeExtension<FireflyColors> {
     Color? onBubbleMe,
     Color? onBubbleThem,
   }) {
-    return FireflyColors(
+    return LumiColors(
       sidebar: sidebar ?? this.sidebar,
       bubbleThem: bubbleThem ?? this.bubbleThem,
       bubbleMe: bubbleMe ?? this.bubbleMe,
@@ -113,9 +113,9 @@ class FireflyColors extends ThemeExtension<FireflyColors> {
   }
 
   @override
-  FireflyColors lerp(FireflyColors? other, double t) {
+  LumiColors lerp(LumiColors? other, double t) {
     if (other == null) return this;
-    return FireflyColors(
+    return LumiColors(
       sidebar: Color.lerp(sidebar, other.sidebar, t)!,
       bubbleThem: Color.lerp(bubbleThem, other.bubbleThem, t)!,
       bubbleMe: Color.lerp(bubbleMe, other.bubbleMe, t)!,

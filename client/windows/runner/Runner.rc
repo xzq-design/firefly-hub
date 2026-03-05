@@ -89,13 +89,13 @@ BEGIN
     BEGIN
         BLOCK "040904e4"
         BEGIN
-            VALUE "CompanyName", "dev.firefly" "\0"
-            VALUE "FileDescription", "firefly_client" "\0"
+            VALUE "CompanyName", "dev.lumi" "\0"
+            VALUE "FileDescription", "lumi_client" "\0"
             VALUE "FileVersion", VERSION_AS_STRING "\0"
-            VALUE "InternalName", "firefly_client" "\0"
-            VALUE "LegalCopyright", "Copyright (C) 2026 dev.firefly. All rights reserved." "\0"
-            VALUE "OriginalFilename", "firefly_client.exe" "\0"
-            VALUE "ProductName", "firefly_client" "\0"
+            VALUE "InternalName", "lumi_client" "\0"
+            VALUE "LegalCopyright", "Copyright (C) 2026 dev.lumi. All rights reserved." "\0"
+            VALUE "OriginalFilename", "lumi_client.exe" "\0"
+            VALUE "ProductName", "lumi_client" "\0"
             VALUE "ProductVersion", VERSION_AS_STRING "\0"
         END
     END

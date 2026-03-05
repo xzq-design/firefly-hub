@@ -1,4 +1,4 @@
-# firefly_client
+# lumi_client
 
 A new Flutter project.
 

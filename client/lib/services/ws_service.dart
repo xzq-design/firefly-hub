@@ -166,7 +166,7 @@ class WsService extends ChangeNotifier {
       'payload': {
         'client_version': '0.1.0',
         'platform': 'windows',
-        'device_name': 'Firefly Client',
+        'device_name': 'Lumi Client',
       },
     });
   }
