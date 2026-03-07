@@ -58,6 +58,39 @@ class LumiMessageEvent(AstrMessageEvent):
         if not text.strip():
             await super().send(MessageChain([]))
             return
+            
+        # 尝试拦截并解析这是不是一个发给 Agent 的内部工具调用
+        try:
+            # 简单粗暴：如果它看起来完全像个 JSON，而且有特定结构
+            if text.strip().startswith("{") and text.strip().endswith("}"):
+                data = json.loads(text.strip())
+                if "action" in data and "args" in data:
+                    from .agent_client import openclaw_client
+                    
+                    # 告知前端，我们正在执行工具
+                    await self._ws_server.send_to_client(self._ws_session_id, {
+                        "message_id": getattr(self.message_obj, "message_id", str(uuid.uuid4())),
+                        "type": "TASK_EXECUTE",
+                        "source": "host",
+                        "target": "client",
+                        "timestamp": int(time.time() * 1000),
+                        "payload": {
+                            "action_type": data["action"],
+                            "message": f"正在执行动作: {data['action']}..."
+                        }
+                    })
+                    
+                    # 把这个动作发给 OpenClaw
+                    # 注意：真实场景中可能需要把回调包装好来等待结果
+                    await openclaw_client.execute_action(data["action"], data["args"])
+                    
+                    # 因为它是一个后台任务下发，我们就不向前端弹聊天框了
+                    await super().send(MessageChain([]))
+                    return
+        except json.JSONDecodeError:
+            pass # 不是合法的 JSON 工具指令，当作普通对话走下面
+        except Exception as e:
+            logger.error(f"[Lumi-Hub] 解析工具指令时异常: {e}")
 
         response = {
             "message_id": getattr(self.message_obj, "message_id", str(uuid.uuid4())),

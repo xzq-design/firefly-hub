@@ -31,15 +31,140 @@ from .lumi_event import LumiMessageEvent
 logger = logging.getLogger("lumi_hub")
 
 
+from astrbot.api.event import filter, AstrMessageEvent
+from astrbot.api.star import register
+
+@register("lumi_hub", "Lumi-Hub", "Lumi-Hub Native Tools Plugin", "1.0.0")
 class LumiHub(Star):
-    """AstrBot 插件壳。
-
-    star_manager 要求 plugins 目录下必须有 Star 子类。
-    真正的逻辑在 LumiHubAdapter (Platform) 中。
+    """AstrBot 插件壳与原生工具中心。
+    包含轻量级的原生 Python 本地执行工具 (双轨制 - Python Native Track)
     """
-    pass
+
+    async def initialize(self) -> None:
+        """插件启动时，深度优化 AI 的 Agent 意识"""
+        try:
+            pm = self.context.persona_manager
+            persona_id = pm.default_persona
+            persona = await pm.get_persona(persona_id)
+            
+            agent_trigger = "### LUMI_IDE_AGENT_v2 ###"
+            # 采用 IDE 风格的强力指令集
+            agent_prompt = (
+                f"\n\n{agent_trigger}\n"
+                "【核心指令集：IDE 模式】\n"
+                "你现在是一个具备完整权限的高级软件工程师 Agent。你的工作效率取决于你的“少说多做”。\n"
+                "1. **ReAct 循环**：当你收到代码修改请求，请务必遵循：[思考 -> 读 -> 思考 -> 改/增/删 -> 验证]。\n"
+                "2. **严禁中断**：一旦 `read_file` 成功返回，你必须立即分析并调用 `search_replace` 或 `insert_content`。严禁在读取成功后向用户汇报“我已经读到了，这是内容”，除非你的最终修改已完成。\n"
+                "3. **精准编辑**：优先使用 `search_replace`。提供待修改的一段唯一的原始代码块（SEARCH）和替换后的代码块（REPLACE）。注意缩进必须严格匹配。\n"
+                "4. **主动性**：如果你不确定文件路径，先用 `list_dir`。发现错误时，先 `read_file` 报错行号。一切以解决问题为导向，而非复读代码内容。\n"
+                "########################"
+            )
+            
+            cleaned_prompt = persona.system_prompt
+            # 清理历史旧版指令标签（如果有）
+            for old_tag in ["### LUMI_AGENT_RULES ###", "### LUMI_IDE_AGENT_v1 ###"]:
+                if old_tag in cleaned_prompt:
+                    idx = cleaned_prompt.find(old_tag)
+                    cleaned_prompt = cleaned_prompt[:idx].strip()
+            
+            if agent_trigger not in cleaned_prompt:
+                new_prompt = cleaned_prompt + agent_prompt
+                await pm.update_persona(persona_id, system_prompt=new_prompt)
+                logger.info(f"[Lumi-Hub] 已成功升级为人格 '{persona_id}' 注入 IDE-Style Agent 指令。")
+        except Exception as e:
+            logger.error(f"[Lumi-Hub] 增强人格失败: {e}")
+
+    @filter.command("test_lumi")
+    async def test_lumi(self, event: AstrMessageEvent):
+        '''测试 Lumi-Hub 插件是否加载成功'''
+        yield event.plain_result("Lumi-Hub 原生工具插件已就绪！")
+
+    @filter.llm_tool(name="read_file")
+    async def read_file(self, event: AstrMessageEvent, path: str, start_line: int = 1, end_line: int = None):
+        '''读取本地指定路径文件的内容。支持分页读取。
+        注意：输出中的 Lx: 前缀是行号参考，不是文件内容，修改时请忽略。
+        Args:
+            path(string): 文件的结构完整路径
+            start_line(number): 起始行号，默认为 1
+            end_line(number): 结束行号（包左不包右），不填则读取到末尾
+        '''
+        logger.info(f"LLM 正在调用 read_file: {path} ({start_line}-{end_line})")
+        from .native_tools import read_file
+        return read_file(path, start_line, end_line)
+
+    @filter.llm_tool(name="search_replace")
+    async def search_replace(self, event: AstrMessageEvent, path: str, search_block: str, replace_block: str):
+        '''【最推荐】IDE 风格的搜索替换。
+        Args:
+            path(string): 文件完整路径
+            search_block(string): 必须提供待替换的原始代码片段（必须是在文件中唯一存在的，包含正确的缩进）。
+            replace_block(string): 替换后的新代码片段。
+        '''
+        from .native_tools import search_replace
+        return search_replace(path, search_block, replace_block)
+
+    @filter.llm_tool(name="insert_content")
+    async def insert_content(self, event: AstrMessageEvent, path: str, line_number: int, content: str):
+        '''【推荐】在文件的指定行号位置插入新内容。
+        Args:
+            path(string): 文件的结构完整路径
+            line_number(number): 要插入的目标行号（1-indexed）
+            content(string): 要插入的文本内容（会自动换行）
+        '''
+        from .native_tools import insert_content
+        return insert_content(path, line_number, content)
 
 
+    @filter.llm_tool(name="list_dir")
+    async def list_dir(self, event: AstrMessageEvent, path: str):
+        '''列出本地指定目录下的文件和文件夹。
+        Args:
+            path(string): 文件夹的结构完整路径
+        '''
+        from .native_tools import list_dir
+        return list_dir(path)
+        
+    @filter.llm_tool(name="write_file")
+    async def write_file(self, event: AstrMessageEvent, path: str, content: str):
+        '''【高危操作】将内容写入到本地文件中。操作前会自动备份原文件。如果文件不存在则新建。
+        Args:
+            path(string): 文件的结构完整路径
+            content(string): 要写入的完整内容
+        '''
+        # TODO: Phase 5 - 拦截并发送 AUTH_REQUIRED 给 Flutter 客户端
+        from .native_tools import write_file
+        return write_file(path, content)
+
+    @filter.llm_tool(name="delete_file")
+    async def delete_file(self, event: AstrMessageEvent, path: str):
+        '''【高危操作】删除本地指定路径的文件。操作前会自动备份原文件到 .Lumi_cache。
+        Args:
+            path(string): 文件的结构完整路径
+        '''
+        from .native_tools import delete_file
+        return delete_file(path)
+
+    @filter.llm_tool(name="replace_content")
+    async def replace_content(self, event: AstrMessageEvent, path: str, old_content: str, new_content: str):
+        '''【推荐】精确修改文件内容。仅当您只需修改文件的一小部分时使用。必须提供唯一的 old_content。
+        Args:
+            path(string): 文件的结构完整路径
+            old_content(string): 要被替换的原始代码片段（必须唯一）
+            new_content(string): 替换后的新代码片段
+        '''
+        from .native_tools import replace_content
+        return replace_content(path, old_content, new_content)
+
+
+
+    @filter.llm_tool(name="get_file_size")
+    async def get_file_size(self, event: AstrMessageEvent, path: str):
+        '''获取文件的字节数大小
+        Args:
+            path(string): 文件的结构完整路径
+        '''
+        from .native_tools import get_file_size
+        return get_file_size(path)
 @register_platform_adapter(
     adapter_name="lumi_hub",
     desc="Lumi-Hub 自建消息前端平台适配器",
@@ -95,6 +220,10 @@ class LumiHubAdapter(Platform):
     async def _run(self) -> None:
         """启动 WebSocket Server 并等待关闭信号。"""
         try:
+            # 启动并连接 OpenClaw
+            from .agent_client import openclaw_client
+            await openclaw_client.connect()
+            
             await self.ws_server.start()
             self.status = __import__(
                 "astrbot.core.platform.platform", fromlist=["PlatformStatus"]
@@ -109,6 +238,11 @@ class LumiHubAdapter(Platform):
         """关闭平台适配器。"""
         logger.info("[Lumi-Hub] 平台适配器关闭中...")
         self._shutdown_event.set()
+        
+        # 关闭 OpenClaw
+        from .agent_client import openclaw_client
+        await openclaw_client.stop()
+        
         await self.ws_server.stop()
 
     def meta(self) -> PlatformMetadata:
@@ -203,7 +337,7 @@ class LumiHubAdapter(Platform):
             ws_session_id=ws_session_id,
         )
 
-        # 3. 注入 AstrBot 事件队列（EventBus 会自动处理、调 LLM、调 event.send()）
+        # 3. 注入 AstrBot 事件队列（EventBus 会自动 handle、调 LLM、调 event.send()）
         self.commit_event(event)
         logger.info(f"[Lumi-Hub] 事件已提交到 AstrBot 队列 (msg_id={msg_id})")
 

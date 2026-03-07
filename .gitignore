@@ -3,3 +3,6 @@
 
 # 排除 README.md (不忽略它)
 !README.md
+
+/data/
+.Lumi_cache/
