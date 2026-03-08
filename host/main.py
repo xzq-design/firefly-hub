@@ -27,6 +27,7 @@ from astrbot.core.star import Star
 
 from .ws_server import LumiWSServer
 from .lumi_event import LumiMessageEvent
+from .database.manager import DatabaseManager
 
 logger = logging.getLogger("lumi_hub")
 
@@ -202,6 +203,15 @@ class LumiHubAdapter(Platform):
         self.ws_server = LumiWSServer(host=ws_host, port=ws_port)
         self.ws_server.on_message(self._handle_client_message)
 
+        # 初始化数据库管理器，数据存放在插件目录下的 data 文件夹
+        import os
+        current_dir = os.path.dirname(os.path.abspath(__file__))
+        data_dir = os.path.join(current_dir, "data")
+        self.db = DatabaseManager(data_dir=data_dir)
+        
+        # 记录已验证的 websocket session -> user_id
+        self.active_sessions: dict[str, int] = {}
+
         self.metadata = PlatformMetadata(
             name="lumi_hub",
             description="Lumi-Hub 自建消息前端",
@@ -220,10 +230,6 @@ class LumiHubAdapter(Platform):
     async def _run(self) -> None:
         """启动 WebSocket Server 并等待关闭信号。"""
         try:
-            # 启动并连接 OpenClaw
-            from .agent_client import openclaw_client
-            await openclaw_client.connect()
-            
             await self.ws_server.start()
             self.status = __import__(
                 "astrbot.core.platform.platform", fromlist=["PlatformStatus"]
@@ -237,12 +243,6 @@ class LumiHubAdapter(Platform):
     async def terminate(self) -> None:
         """关闭平台适配器。"""
         logger.info("[Lumi-Hub] 平台适配器关闭中...")
-        self._shutdown_event.set()
-        
-        # 关闭 OpenClaw
-        from .agent_client import openclaw_client
-        await openclaw_client.stop()
-        
         await self.ws_server.stop()
 
     def meta(self) -> PlatformMetadata:
@@ -255,33 +255,43 @@ class LumiHubAdapter(Platform):
         message_chain: MessageChain,
     ) -> None:
         """通过会话发送主动消息（插件主动推送）。"""
-        # 从 session_id 中提取 ws_session_id
-        # 格式: lumi_hub!user!{ws_session_id}
+        # 从 session_id 中提取 user_id 和 context_id
+        # 格式: lumi_hub!{user_id}!{context_id}
         parts = session.session_id.split("!")
+        user_id = None
         if len(parts) >= 3:
-            ws_session_id = parts[2]
-        else:
-            ws_session_id = session.session_id
+            try:
+                user_id = int(parts[1])
+            except ValueError:
+                pass
 
         text_parts = []
         for comp in message_chain.chain:
             if isinstance(comp, Plain):
                 text_parts.append(comp.text)
+                
+        content_str = "".join(text_parts)
 
-        if text_parts:
-            msg = {
-                "message_id": str(uuid.uuid4())[:8],
-                "type": "CHAT_RESPONSE",
-                "source": "host",
-                "target": "client",
-                "timestamp": int(time.time() * 1000),
-                "payload": {
-                    "content": "".join(text_parts),
-                    "status": "success",
-                    "persona": "default",
-                },
-            }
-            await self.ws_server.send_to_client(ws_session_id, msg)
+        if content_str and user_id is not None:
+            # 存入数据库 (无论用户是否在线、连接是否存在都可以保存)
+            self.db.save_message(user_id=user_id, role="assistant", content=content_str)
+            
+            # 查找所有关联到该 user_id 的 ws_session_id 并分发
+            target_ws_ids = [ws_id for ws_id, uid in self.active_sessions.items() if uid == user_id]
+            for ws_id in target_ws_ids:
+                msg = {
+                    "message_id": str(uuid.uuid4())[:8],
+                    "type": "CHAT_RESPONSE",
+                    "source": "host",
+                    "target": "client",
+                    "timestamp": int(time.time() * 1000),
+                    "payload": {
+                        "content": content_str,
+                        "status": "success",
+                        "persona": "default",
+                    },
+                }
+                await self.ws_server.send_to_client(ws_id, msg)
 
         await super().send_by_session(session, message_chain)
 
@@ -297,8 +307,117 @@ class LumiHubAdapter(Platform):
             await self._handle_persona_switch(message, ws_session_id)
         elif msg_type == "PERSONA_LIST":
             await self._handle_persona_list(message, ws_session_id)
+        elif msg_type == "AUTH_REGISTER":
+            await self._handle_auth_register(message, ws_session_id)
+        elif msg_type == "AUTH_LOGIN":
+            await self._handle_auth_login(message, ws_session_id)
+        elif msg_type == "AUTH_RESTORE":
+            await self._handle_auth_restore(message, ws_session_id)
+        elif msg_type == "HISTORY_REQUEST":
+            await self._handle_history_request(message, ws_session_id)
         else:
             logger.warning(f"[Lumi-Hub] 未知消息类型: {msg_type}")
+
+    async def _handle_auth_register(self, message: dict, ws_session_id: str) -> None:
+        payload = message.get("payload", {})
+        username = payload.get("username", "")
+        password = payload.get("password", "")
+        
+        result = self.db.create_user(username, password)
+        msg_id = message.get("message_id", str(uuid.uuid4())[:8])
+        
+        if "error" in result:
+            await self.ws_server.send_to_client(ws_session_id, {
+                "message_id": msg_id, "type": "AUTH_RESPONSE", "source": "host", "target": "client",
+                "payload": {"status": "error", "message": result["error"]}
+            })
+        else:
+            # 注册成功直接登录
+            self.active_sessions[ws_session_id] = result["id"]
+            await self.ws_server.send_to_client(ws_session_id, {
+                "message_id": msg_id, "type": "AUTH_RESPONSE", "source": "host", "target": "client",
+                "payload": {"status": "success", "user": {"id": result["id"], "username": result["username"]}, "token": str(result["id"])}
+            })
+            logger.info(f"[Lumi-Hub] 用户注册并登录成功: {username}")
+
+    async def _handle_auth_login(self, message: dict, ws_session_id: str) -> None:
+        payload = message.get("payload", {})
+        username = payload.get("username", "")
+        password = payload.get("password", "")
+        
+        result = self.db.verify_user(username, password)
+        msg_id = message.get("message_id", str(uuid.uuid4())[:8])
+        
+        if "error" in result:
+            await self.ws_server.send_to_client(ws_session_id, {
+                "message_id": msg_id, "type": "AUTH_RESPONSE", "source": "host", "target": "client",
+                "payload": {"status": "error", "message": result["error"]}
+            })
+        else:
+            self.active_sessions[ws_session_id] = result["id"]
+            await self.ws_server.send_to_client(ws_session_id, {
+                "message_id": msg_id, "type": "AUTH_RESPONSE", "source": "host", "target": "client",
+                "payload": {"status": "success", "user": {"id": result["id"], "username": result["username"]}, "token": str(result["id"])}
+            })
+            logger.info(f"[Lumi-Hub] 用户登录成功: {username}")
+
+    async def _handle_auth_restore(self, message: dict, ws_session_id: str) -> None:
+        payload = message.get("payload", {})
+        token = payload.get("token", "")
+        msg_id = message.get("message_id", str(uuid.uuid4())[:8])
+
+        if not token:
+            return
+
+        try:
+            user_id = int(token)
+            user = self.db.get_user_by_id(user_id)
+            if user:
+                self.active_sessions[ws_session_id] = user_id
+                await self.ws_server.send_to_client(ws_session_id, {
+                    "message_id": msg_id, "type": "AUTH_RESPONSE", "source": "host", "target": "client",
+                    "payload": {"status": "success", "user": user, "token": token}
+                })
+                logger.info(f"[Lumi-Hub] 用户通过 Token 恢复会话成功: {user['username']}")
+            else:
+                await self.ws_server.send_to_client(ws_session_id, {
+                    "message_id": msg_id, "type": "AUTH_RESPONSE", "source": "host", "target": "client",
+                    "payload": {"status": "error", "message": "Invalid token"}
+                })
+        except ValueError:
+            await self.ws_server.send_to_client(ws_session_id, {
+                "message_id": msg_id, "type": "AUTH_RESPONSE", "source": "host", "target": "client",
+                "payload": {"status": "error", "message": "Malformed token"}
+            })
+
+    async def _handle_history_request(self, message: dict, ws_session_id: str) -> None:
+        user_id = self.active_sessions.get(ws_session_id)
+        msg_id = message.get("message_id", str(uuid.uuid4())[:8])
+        if not user_id:
+            logger.warning(f"[Lumi-Hub] 拒绝未登录用户的历史记录请求")
+            await self.ws_server.send_to_client(ws_session_id, {
+                "message_id": msg_id, "type": "ERROR_ALERT", "source": "host", "target": "client",
+                "payload": {"error_code": "UNAUTHORIZED", "detail": "请先登录"}
+            })
+            return
+            
+        payload = message.get("payload", {})
+        limit = payload.get("limit", 50)
+        offset = payload.get("offset", 0)
+        
+        messages = self.db.get_messages(user_id=user_id, limit=limit, offset=offset)
+        
+        await self.ws_server.send_to_client(ws_session_id, {
+            "message_id": msg_id,
+            "type": "HISTORY_RESPONSE",
+            "source": "host",
+            "target": "client",
+            "timestamp": int(time.time() * 1000),
+            "payload": {
+                "messages": messages,
+                "has_more": len(messages) == limit
+            }
+        })
 
     async def _handle_chat_request(self, message: dict, ws_session_id: str) -> None:
         """
@@ -315,12 +434,27 @@ class LumiHubAdapter(Platform):
 
         logger.info(f"[Lumi-Hub] 收到消息 (session={ws_session_id}): {user_content}")
 
+        # 鉴权校验
+        user_id = self.active_sessions.get(ws_session_id)
+        if not user_id:
+            logger.warning(f"[Lumi-Hub] 未登录用户尝试发送消息，已拒绝")
+            await self.ws_server.send_to_client(ws_session_id, {
+                "message_id": msg_id, "type": "ERROR_ALERT", "source": "host", "target": "client",
+                "timestamp": int(time.time() * 1000), "payload": {"error_code": "UNAUTHORIZED", "detail": "请先登录"}
+            })
+            return
+
+        # 异步存入数据库
+        self.db.save_message(user_id=user_id, role="user", content=user_content, client_msg_id=msg_id)
+
         # 1. 构造 AstrBotMessage（和 WebChatAdapter 做法一致）
         abm = AstrBotMessage()
         abm.self_id = "lumi_hub"
-        abm.sender = MessageMember(user_id=ws_session_id, nickname="开拓者")
+        # 使用绑定的真实账号 user_id 而不是动态 session_id 作为识别，让大模型持久记忆用户
+        abm.sender = MessageMember(user_id=str(user_id), nickname=f"User_{user_id}")
         abm.type = MessageType.FRIEND_MESSAGE
-        abm.session_id = f"lumi_hub!{ws_session_id}!{context_id}"
+        # SessionID 格式: lumi_hub!user_id!context_id，这样 AstrBot 的会话上下文将完全跟着账号走
+        abm.session_id = f"lumi_hub!{user_id}!{context_id}"
         abm.message_id = msg_id
         abm.message = [Plain(user_content)]
         abm.message_str = user_content
@@ -335,6 +469,8 @@ class LumiHubAdapter(Platform):
             session_id=abm.session_id,
             ws_server=self.ws_server,
             ws_session_id=ws_session_id,
+            db=self.db,
+            user_id=user_id,
         )
 
         # 3. 注入 AstrBot 事件队列（EventBus 会自动 handle、调 LLM、调 event.send()）

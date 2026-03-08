@@ -160,7 +160,6 @@ class _Sidebar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final settings = context.watch<AppSettings>();
     return Container(
       width: 260,
       color: colors.sidebar,
@@ -191,59 +190,178 @@ class _Sidebar extends StatelessWidget {
           ),
           const Spacer(),
           Divider(height: 1, color: colors.divider),
-          // 字体选择行
+          const Spacer(),
+          Divider(height: 1, color: colors.divider),
+          // 设置入口
           Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-            child: Row(
+            padding: const EdgeInsets.symmetric(horizontal: 8.0, vertical: 4.0),
+            child: ListTile(
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(8),
+              ),
+              hoverColor: colors.accent.withValues(alpha: 0.1),
+              contentPadding: const EdgeInsets.symmetric(horizontal: 16),
+              leading: Icon(
+                Icons.settings_outlined,
+                color: colors.subtext,
+                size: 20,
+              ),
+              title: Text(
+                '设置',
+                style: TextStyle(color: colors.subtext, fontSize: 13),
+              ),
+              onTap: () {
+                showDialog(
+                  context: context,
+                  builder: (_) => _SettingsDialog(ws: ws, colors: colors),
+                );
+              },
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _SettingsDialog extends StatelessWidget {
+  final WsService ws;
+  final LumiColors colors;
+
+  const _SettingsDialog({required this.ws, required this.colors});
+
+  @override
+  Widget build(BuildContext context) {
+    final settings = context.watch<AppSettings>();
+    final user = ws.user;
+
+    return AlertDialog(
+      backgroundColor: colors.sidebar,
+      title: Text(
+        '偏好设置',
+        style: TextStyle(
+          color: Theme.of(context).colorScheme.onSurface,
+          fontSize: 18,
+          fontWeight: FontWeight.bold,
+        ),
+      ),
+      content: SizedBox(
+        width: 300,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // 账号信息卡片
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: colors.inputBg,
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Row(
+                children: [
+                  CircleAvatar(
+                    backgroundColor: colors.accent,
+                    child: const Icon(Icons.person, color: Colors.white),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          user?['username'] ?? '未知用户',
+                          style: TextStyle(
+                            color: Theme.of(context).colorScheme.onSurface,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                        Text(
+                          'ID: ${user?['id'] ?? '-'}',
+                          style: TextStyle(color: colors.subtext, fontSize: 12),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 20),
+
+            // 字体设置
+            Text(
+              '界面',
+              style: TextStyle(
+                color: colors.subtext,
+                fontSize: 13,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+            const SizedBox(height: 8),
+            Row(
               children: [
                 Icon(
                   Icons.font_download_outlined,
-                  size: 16,
                   color: colors.subtext,
+                  size: 20,
                 ),
                 const SizedBox(width: 8),
-                Expanded(
-                  child: Text(
-                    kAvailableFonts[settings.fontKey] ?? '系统默认',
-                    style: TextStyle(fontSize: 13, color: colors.subtext),
+                Text(
+                  '字体',
+                  style: TextStyle(
+                    color: Theme.of(context).colorScheme.onSurface,
                   ),
                 ),
-                PopupMenuButton<String>(
-                  tooltip: '切换字体',
-                  icon: Icon(
-                    Icons.expand_more,
-                    size: 18,
-                    color: colors.subtext,
+                const Spacer(),
+                DropdownButton<String>(
+                  value: settings.fontKey,
+                  dropdownColor: colors.inputBg,
+                  style: TextStyle(
+                    color: Theme.of(context).colorScheme.onSurface,
                   ),
-                  onSelected: settings.setFontFamily,
-                  itemBuilder: (_) => kAvailableFonts.entries
+                  underline: const SizedBox(),
+                  items: kAvailableFonts.entries
                       .map(
-                        (e) => PopupMenuItem<String>(
+                        (e) => DropdownMenuItem(
                           value: e.key,
-                          child: Row(
-                            children: [
-                              if (settings.fontKey == e.key)
-                                Icon(
-                                  Icons.check,
-                                  size: 16,
-                                  color: colors.accent,
-                                )
-                              else
-                                const SizedBox(width: 16),
-                              const SizedBox(width: 8),
-                              Text(e.value),
-                            ],
-                          ),
+                          child: Text(e.value),
                         ),
                       )
                       .toList(),
+                  onChanged: (val) {
+                    if (val != null) settings.setFontFamily(val);
+                  },
                 ),
               ],
             ),
-          ),
-          const SizedBox(height: 4),
-        ],
+            const SizedBox(height: 24),
+
+            // 注销按钮
+            SizedBox(
+              width: double.infinity,
+              child: OutlinedButton.icon(
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: Colors.redAccent,
+                  side: const BorderSide(color: Colors.redAccent),
+                  padding: const EdgeInsets.symmetric(vertical: 12),
+                ),
+                icon: const Icon(Icons.logout, size: 18),
+                label: const Text('注销登录'),
+                onPressed: () async {
+                  await ws.logout();
+                  if (context.mounted) Navigator.pop(context);
+                },
+              ),
+            ),
+          ],
+        ),
       ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: Text('关闭', style: TextStyle(color: colors.subtext)),
+        ),
+      ],
     );
   }
 }
@@ -491,27 +609,29 @@ class _MessageList extends StatelessWidget {
       );
     }
 
-    return ListView.builder(
-      controller: scroll,
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-      itemCount: messages.length,
-      itemBuilder: (_, i) {
-        final msg = messages[i];
-        return _BubbleItem(
-          msg: msg,
-          colors: colors,
-          isSelected: selectedMessageIds.contains(msg.id),
-          isSelectionMode: isSelectionMode,
-          onToggleSelection: () => onToggleSelection(msg.id),
-          onEnterSelectionMode: onEnterSelectionMode,
-          onDeleteMessage: () => onDeleteMessage(msg.id),
-        );
-      },
+    return SelectionArea(
+      child: ListView.builder(
+        controller: scroll,
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+        itemCount: messages.length,
+        itemBuilder: (_, i) {
+          final msg = messages[i];
+          return _BubbleItem(
+            msg: msg,
+            colors: colors,
+            isSelected: selectedMessageIds.contains(msg.id),
+            isSelectionMode: isSelectionMode,
+            onToggleSelection: () => onToggleSelection(msg.id),
+            onEnterSelectionMode: onEnterSelectionMode,
+            onDeleteMessage: () => onDeleteMessage(msg.id),
+          );
+        },
+      ),
     );
   }
 }
 
-class _BubbleItem extends StatelessWidget {
+class _BubbleItem extends StatefulWidget {
   final ChatMessage msg;
   final LumiColors colors;
   final bool isSelected;
@@ -530,11 +650,18 @@ class _BubbleItem extends StatelessWidget {
     required this.onDeleteMessage,
   });
 
+  @override
+  State<_BubbleItem> createState() => _BubbleItemState();
+}
+
+class _BubbleItemState extends State<_BubbleItem> {
+  bool _isHovered = false;
+
   void _showContextMenu(BuildContext context) {
-    if (msg.isTyping) return;
+    if (widget.msg.isTyping) return;
     showModalBottomSheet(
       context: context,
-      backgroundColor: colors.sidebar,
+      backgroundColor: widget.colors.sidebar,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
       ),
@@ -550,7 +677,9 @@ class _BubbleItem extends StatelessWidget {
                 ),
                 title: const Text('复制'),
                 onTap: () async {
-                  await Clipboard.setData(ClipboardData(text: msg.content));
+                  await Clipboard.setData(
+                    ClipboardData(text: widget.msg.content),
+                  );
                   if (context.mounted) {
                     Navigator.pop(context);
                     ScaffoldMessenger.of(context).showSnackBar(
@@ -570,8 +699,8 @@ class _BubbleItem extends StatelessWidget {
                 title: const Text('多选'),
                 onTap: () {
                   Navigator.pop(context);
-                  onEnterSelectionMode();
-                  onToggleSelection(); // Also select the current item
+                  widget.onEnterSelectionMode();
+                  widget.onToggleSelection(); // Also select the current item
                 },
               ),
               ListTile(
@@ -598,7 +727,7 @@ class _BubbleItem extends StatelessWidget {
                         TextButton(
                           onPressed: () {
                             Navigator.pop(context);
-                            onDeleteMessage();
+                            widget.onDeleteMessage();
                           },
                           child: const Text(
                             '删除',
@@ -619,140 +748,172 @@ class _BubbleItem extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final isMe = msg.sender == MessageSender.me;
-    final bubbleColor = isMe ? colors.bubbleMe : colors.bubbleThem;
-    final textColor = isMe ? colors.onBubbleMe : colors.onBubbleThem;
-    final timeStr = DateFormat('HH:mm').format(msg.time);
+    final isMe = widget.msg.sender == MessageSender.me;
+    final bubbleColor = isMe
+        ? widget.colors.bubbleMe
+        : widget.colors.bubbleThem;
+    final textColor = isMe
+        ? widget.colors.onBubbleMe
+        : widget.colors.onBubbleThem;
+    final now = DateTime.now();
+    final timeStr = widget.msg.time.year == now.year
+        ? DateFormat('MM-dd HH:mm:ss').format(widget.msg.time)
+        : DateFormat('yyyy-MM-dd HH:mm:ss').format(widget.msg.time);
 
     Widget bubbleWidget = Padding(
       padding: const EdgeInsets.only(bottom: 6),
-      child: GestureDetector(
-        onLongPress: isSelectionMode ? null : () => _showContextMenu(context),
-        onTap: isSelectionMode ? onToggleSelection : null,
-        child: Container(
-          color: isSelected
-              ? colors.accent.withValues(alpha: 0.15)
-              : Colors.transparent,
-          child: Row(
-            mainAxisAlignment: isMe
-                ? MainAxisAlignment.end
-                : MainAxisAlignment.start,
-            crossAxisAlignment: CrossAxisAlignment.end,
-            children: [
-              if (isSelectionMode && !isMe)
-                Padding(
-                  padding: const EdgeInsets.only(right: 8, bottom: 8),
-                  child: AbsorbPointer(
-                    child: Checkbox(
-                      value: isSelected,
-                      onChanged: (_) {},
-                      activeColor: colors.accent,
-                    ),
+      child: MouseRegion(
+        onEnter: (_) => setState(() => _isHovered = true),
+        onExit: (_) => setState(() => _isHovered = false),
+        child: Column(
+          crossAxisAlignment: isMe
+              ? CrossAxisAlignment.end
+              : CrossAxisAlignment.start,
+          children: [
+            AnimatedOpacity(
+              opacity: _isHovered ? 1.0 : 0.0,
+              duration: const Duration(milliseconds: 200),
+              child: Padding(
+                padding: EdgeInsets.only(
+                  left: isMe ? 0 : 54.0,
+                  right: isMe ? 12.0 : 0,
+                  bottom: 4,
+                ),
+                child: Text(
+                  timeStr,
+                  style: TextStyle(
+                    color: widget.colors.subtext.withValues(alpha: 0.8),
+                    fontSize: 12,
                   ),
                 ),
-              if (!isMe) ...[
-                CircleAvatar(
-                  radius: 16,
-                  backgroundColor: colors.accent,
-                  child: const Text(
-                    '流',
-                    style: TextStyle(color: Colors.white, fontSize: 12),
-                  ),
-                ),
-                const SizedBox(width: 8),
-              ],
-              Flexible(
-                child: Container(
-                  constraints: BoxConstraints(
-                    maxWidth: MediaQuery.of(context).size.width * 0.55,
-                  ),
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 12,
-                    vertical: 8,
-                  ),
-                  decoration: BoxDecoration(
-                    color: bubbleColor,
-                    borderRadius: BorderRadius.only(
-                      topLeft: const Radius.circular(16),
-                      topRight: const Radius.circular(16),
-                      bottomLeft: Radius.circular(isMe ? 16 : 4),
-                      bottomRight: Radius.circular(isMe ? 4 : 16),
-                    ),
-                    boxShadow: [
-                      BoxShadow(
-                        color: Colors.black.withValues(alpha: 0.08),
-                        blurRadius: 4,
-                        offset: const Offset(0, 2),
+              ),
+            ),
+            GestureDetector(
+              onLongPress: widget.isSelectionMode
+                  ? null
+                  : () => _showContextMenu(context),
+              onTap: widget.isSelectionMode ? widget.onToggleSelection : null,
+              child: Container(
+                color: widget.isSelected
+                    ? widget.colors.accent.withValues(alpha: 0.15)
+                    : Colors.transparent,
+                child: Row(
+                  mainAxisAlignment: isMe
+                      ? MainAxisAlignment.end
+                      : MainAxisAlignment.start,
+                  crossAxisAlignment: CrossAxisAlignment.end,
+                  children: [
+                    if (widget.isSelectionMode && !isMe)
+                      Padding(
+                        padding: const EdgeInsets.only(right: 8, bottom: 8),
+                        child: AbsorbPointer(
+                          child: Checkbox(
+                            value: widget.isSelected,
+                            onChanged: (_) {},
+                            activeColor: widget.colors.accent,
+                          ),
+                        ),
                       ),
+                    if (!isMe) ...[
+                      CircleAvatar(
+                        radius: 16,
+                        backgroundColor: widget.colors.accent,
+                        child: const Text(
+                          '流',
+                          style: TextStyle(color: Colors.white, fontSize: 12),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
                     ],
-                  ),
-                  child: msg.isTyping
-                      ? _TypingIndicator(color: textColor)
-                      : Column(
-                          crossAxisAlignment: CrossAxisAlignment.end,
-                          children: [
-                            MarkdownBody(
-                              data: msg.content,
-                              selectable:
-                                  !isSelectionMode, // Disable text selection when in multi-select mode
-                              styleSheet: MarkdownStyleSheet(
-                                p: TextStyle(
-                                  color: textColor,
-                                  fontSize: 14,
-                                  height: 1.4,
-                                ),
-                                listBullet: TextStyle(
-                                  color: textColor,
-                                  fontSize: 14,
-                                ),
-                                code: TextStyle(
-                                  backgroundColor: Colors.black26,
-                                  color: textColor,
-                                  fontFamily: 'monospace',
-                                  fontSize: 13,
-                                ),
-                                codeblockDecoration: BoxDecoration(
-                                  borderRadius: BorderRadius.circular(8),
-                                  color: const Color(0xFF282C34),
-                                ),
-                                blockquoteDecoration: BoxDecoration(
-                                  color: colors.sidebar.withValues(alpha: 0.5),
-                                  border: Border(
-                                    left: BorderSide(
-                                      color: colors.accent,
-                                      width: 4,
-                                    ),
-                                  ),
-                                ),
-                              ),
-                              builders: {'code': CodeElementBuilder()},
-                            ),
-                            const SizedBox(height: 4),
-                            Text(
-                              timeStr,
-                              style: TextStyle(
-                                color: textColor.withValues(alpha: 0.55),
-                                fontSize: 11,
-                              ),
+                    Flexible(
+                      child: Container(
+                        constraints: BoxConstraints(
+                          maxWidth: MediaQuery.of(context).size.width * 0.55,
+                        ),
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 12,
+                          vertical: 8,
+                        ),
+                        decoration: BoxDecoration(
+                          color: bubbleColor,
+                          borderRadius: BorderRadius.only(
+                            topLeft: const Radius.circular(16),
+                            topRight: const Radius.circular(16),
+                            bottomLeft: Radius.circular(isMe ? 16 : 4),
+                            bottomRight: Radius.circular(isMe ? 4 : 16),
+                          ),
+                          boxShadow: [
+                            BoxShadow(
+                              color: Colors.black.withValues(alpha: 0.08),
+                              blurRadius: 4,
+                              offset: const Offset(0, 2),
                             ),
                           ],
                         ),
+                        child: widget.msg.isTyping
+                            ? _TypingIndicator(color: textColor)
+                            : Column(
+                                crossAxisAlignment: CrossAxisAlignment.end,
+                                children: [
+                                  MarkdownBody(
+                                    data: widget.msg.content,
+                                    selectable:
+                                        false, // Let parent SelectionArea handle selection
+                                    styleSheet: MarkdownStyleSheet(
+                                      p: TextStyle(
+                                        color: textColor,
+                                        fontSize: 14,
+                                        height: 1.4,
+                                      ),
+                                      listBullet: TextStyle(
+                                        color: textColor,
+                                        fontSize: 14,
+                                      ),
+                                      code: TextStyle(
+                                        backgroundColor: Colors.black26,
+                                        color: textColor,
+                                        fontFamily: 'monospace',
+                                        fontSize: 13,
+                                      ),
+                                      codeblockDecoration: BoxDecoration(
+                                        borderRadius: BorderRadius.circular(8),
+                                        color: const Color(0xFF282C34),
+                                      ),
+                                      blockquoteDecoration: BoxDecoration(
+                                        color: widget.colors.sidebar.withValues(
+                                          alpha: 0.5,
+                                        ),
+                                        border: Border(
+                                          left: BorderSide(
+                                            color: widget.colors.accent,
+                                            width: 4,
+                                          ),
+                                        ),
+                                      ),
+                                    ),
+                                    builders: {'code': CodeElementBuilder()},
+                                  ),
+                                ],
+                              ),
+                      ),
+                    ),
+                    if (isMe) const SizedBox(width: 8),
+                    if (widget.isSelectionMode && isMe)
+                      Padding(
+                        padding: const EdgeInsets.only(left: 8, bottom: 8),
+                        child: AbsorbPointer(
+                          child: Checkbox(
+                            value: widget.isSelected,
+                            onChanged: (_) {},
+                            activeColor: widget.colors.accent,
+                          ),
+                        ),
+                      ),
+                  ],
                 ),
               ),
-              if (isMe) const SizedBox(width: 8),
-              if (isSelectionMode && isMe)
-                Padding(
-                  padding: const EdgeInsets.only(left: 8, bottom: 8),
-                  child: AbsorbPointer(
-                    child: Checkbox(
-                      value: isSelected,
-                      onChanged: (_) {},
-                      activeColor: colors.accent,
-                    ),
-                  ),
-                ),
-            ],
-          ),
+            ),
+          ],
         ),
       ),
     );

@@ -30,6 +30,7 @@ int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev,
   if (!window.Create(L"Lumi-Hub", origin, size)) {
     return EXIT_FAILURE;
   }
+  // window.Show(); // Do not show immediately, let window_manager handle it.
   window.SetQuitOnClose(true);
 
   ::MSG msg;

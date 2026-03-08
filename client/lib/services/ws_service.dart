@@ -4,6 +4,7 @@ import 'dart:math';
 
 import 'package:flutter/foundation.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../models/message.dart';
 
@@ -26,7 +27,31 @@ class WsService extends ChangeNotifier {
   Timer? _reconnectTimer;
   bool _disposed = false;
 
+  bool _isAuthenticated = false;
+  bool get isAuthenticated => _isAuthenticated;
+  bool isRestoringAuth = false;
+  String? _token;
+  Map<String, dynamic>? _user;
+  Map<String, dynamic>? get user => _user;
+
   String get serverUrl => _defaultUrl;
+
+  WsService() {
+    _initAuth().then((_) {
+      connect();
+    });
+  }
+
+  Future<void> _initAuth() async {
+    final prefs = await SharedPreferences.getInstance();
+    _token = prefs.getString('auth_token');
+    if (_token != null) {
+      isRestoringAuth = true;
+    }
+    // 注意：这里不再乐观地直接设置 _isAuthenticated = true
+    // 而是等待 connect() 之后通过 AUTH_RESTORE 从服务端拿回结果，才进入 ChatScreen
+    notifyListeners();
+  }
 
   // ── 连接 ──────────────────────────────────────────────────────────────
 
@@ -44,6 +69,9 @@ class WsService extends ChangeNotifier {
       );
       _setStatus(WsStatus.connected);
       _sendHandshake();
+      if (_token != null) {
+        restoreAuth();
+      }
       _startPing();
     } catch (e) {
       debugPrint('[WS] 连接失败: $e');
@@ -112,6 +140,10 @@ class WsService extends ChangeNotifier {
           break;
         case 'CONNECT':
           debugPrint('[WS] 握手确认: ${data['payload']}');
+        case 'AUTH_RESPONSE':
+          _handleAuthResponse(data);
+        case 'HISTORY_RESPONSE':
+          _handleHistoryResponse(data);
         default:
           debugPrint('[WS] 未处理消息类型: $type');
       }
@@ -135,6 +167,111 @@ class WsService extends ChangeNotifier {
         time: DateTime.now(),
       ),
     );
+    notifyListeners();
+  }
+
+  Future<void> _handleAuthResponse(Map<String, dynamic> data) async {
+    final payload = data['payload'] as Map<String, dynamic>? ?? {};
+    final status = payload['status'] as String?;
+
+    isRestoringAuth = false;
+
+    if (status == 'success') {
+      _isAuthenticated = true;
+      _token = payload['token'] as String?;
+      _user = payload['user'] as Map<String, dynamic>?;
+
+      if (_token != null) {
+        final prefs = await SharedPreferences.getInstance();
+        await prefs.setString('auth_token', _token!);
+        debugPrint('[WS] Auth 成功，已保存 Token: $_token');
+
+        // 登录成功后拉取历史
+        requestHistory();
+      }
+      notifyListeners();
+    } else {
+      debugPrint('[WS] Auth 失败: ${payload['message']}');
+      await logout();
+    }
+  }
+
+  void _handleHistoryResponse(Map<String, dynamic> data) {
+    final payload = data['payload'] as Map<String, dynamic>? ?? {};
+    final messagesJson = payload['messages'] as List<dynamic>? ?? [];
+
+    _messages.clear();
+    for (var m in messagesJson) {
+      final msg = m as Map<String, dynamic>;
+      final isMe = msg['role'] == 'user';
+      _messages.add(
+        ChatMessage(
+          id: msg['id']?.toString() ?? msg['client_msg_id'] ?? _genId(),
+          content: msg['content'] as String? ?? '',
+          sender: isMe ? MessageSender.me : MessageSender.ai,
+          time: DateTime.fromMillisecondsSinceEpoch(
+            (msg['timestamp'] as num).toInt(),
+          ),
+        ),
+      );
+    }
+    notifyListeners();
+  }
+
+  // ── 认证方法 ─────────────────────────────────────────────────────────
+
+  void login(String username, String password) {
+    if (_status != WsStatus.connected) return;
+    _send({
+      'message_id': _genId(),
+      'type': 'AUTH_LOGIN',
+      'source': 'client',
+      'target': 'host',
+      'payload': {'username': username, 'password': password},
+    });
+  }
+
+  void register(String username, String password) {
+    if (_status != WsStatus.connected) return;
+    _send({
+      'message_id': _genId(),
+      'type': 'AUTH_REGISTER',
+      'source': 'client',
+      'target': 'host',
+      'payload': {'username': username, 'password': password},
+    });
+  }
+
+  void restoreAuth() {
+    if (_status != WsStatus.connected || _token == null) return;
+    _send({
+      'message_id': _genId(),
+      'type': 'AUTH_RESTORE',
+      'source': 'client',
+      'target': 'host',
+      'payload': {'token': _token},
+    });
+  }
+
+  void requestHistory({int limit = 50, int offset = 0}) {
+    if (_status != WsStatus.connected || !_isAuthenticated) return;
+    _send({
+      'message_id': _genId(),
+      'type': 'HISTORY_REQUEST',
+      'source': 'client',
+      'target': 'host',
+      'payload': {'limit': limit, 'offset': offset},
+    });
+  }
+
+  Future<void> logout() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove('auth_token');
+    _isAuthenticated = false;
+    isRestoringAuth = false;
+    _token = null;
+    _user = null;
+    _messages.clear();
     notifyListeners();
   }
 

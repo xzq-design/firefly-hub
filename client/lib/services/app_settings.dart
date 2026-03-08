@@ -4,7 +4,7 @@ import 'package:flutter/foundation.dart';
 const Map<String, String> kAvailableFonts = {'': '系统默认', 'MiSans': 'MiSans'};
 
 class AppSettings extends ChangeNotifier {
-  String _fontFamily = ''; // 空字符串 = 系统默认
+  String _fontFamily = 'MiSans'; // 默认使用 MiSans
 
   /// 当前字体族名（null = 系统默认，传给 ThemeData.fontFamily）
   String? get fontFamily => _fontFamily.isEmpty ? null : _fontFamily;
