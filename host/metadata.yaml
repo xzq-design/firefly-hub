@@ -1,5 +1,0 @@
-name: lumi_hub
-description: "Lumi-Hub 自建消息前端平台适配器，替代 QQ 对接 AstrBot，集成 OpenClaw + MCP"
-author: "Lumivers"
-version: "0.2.0"
-repo: "https://github.com/Lumivers/Lumi-Hub"
