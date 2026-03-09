@@ -101,6 +101,17 @@ class LumiHub(Star):
             search_block(string): 必须提供待替换的原始代码片段（必须是在文件中唯一存在的，包含正确的缩进）。
             replace_block(string): 替换后的新代码片段。
         '''
+        if hasattr(event, "wait_for_auth"):
+            approved = await event.wait_for_auth(
+                action_type="FILE_MODIFY",
+                target_path=path,
+                description=f"修改文件并应用 SEARCH/REPLACE 块。",
+                tool_name="search_replace",
+                diff_preview=f"SEARCH:\n{search_block}\n\nREPLACE:\n{replace_block}"
+            )
+            if not approved:
+                return "Error: User rejected the file modification."
+
         from .native_tools import search_replace
         return search_replace(path, search_block, replace_block)
 
@@ -112,6 +123,17 @@ class LumiHub(Star):
             line_number(number): 要插入的目标行号（1-indexed）
             content(string): 要插入的文本内容（会自动换行）
         '''
+        if hasattr(event, "wait_for_auth"):
+            approved = await event.wait_for_auth(
+                action_type="FILE_MODIFY",
+                target_path=path,
+                description=f"在第 {line_number} 行插入内容。",
+                tool_name="insert_content",
+                diff_preview=content
+            )
+            if not approved:
+                return "Error: User rejected the file modification."
+
         from .native_tools import insert_content
         return insert_content(path, line_number, content)
 
@@ -132,7 +154,18 @@ class LumiHub(Star):
             path(string): 文件的结构完整路径
             content(string): 要写入的完整内容
         '''
-        # TODO: Phase 5 - 拦截并发送 AUTH_REQUIRED 给 Flutter 客户端
+        if hasattr(event, "wait_for_auth"):
+            import os
+            approved = await event.wait_for_auth(
+                action_type="FILE_CREATE" if not os.path.exists(path) else "FILE_MODIFY",
+                target_path=path,
+                description=f"全量写入文件内容。",
+                tool_name="write_file",
+                diff_preview=content[:500] + ("..." if len(content) > 500 else "")
+            )
+            if not approved:
+                return "Error: User rejected the file operation."
+
         from .native_tools import write_file
         return write_file(path, content)
 
@@ -142,6 +175,16 @@ class LumiHub(Star):
         Args:
             path(string): 文件的结构完整路径
         '''
+        if hasattr(event, "wait_for_auth"):
+            approved = await event.wait_for_auth(
+                action_type="FILE_DELETE",
+                target_path=path,
+                description=f"物理删除文件（已自动备份）。",
+                tool_name="delete_file"
+            )
+            if not approved:
+                return "Error: User rejected the file deletion."
+
         from .native_tools import delete_file
         return delete_file(path)
 
@@ -153,6 +196,17 @@ class LumiHub(Star):
             old_content(string): 要被替换的原始代码片段（必须唯一）
             new_content(string): 替换后的新代码片段
         '''
+        if hasattr(event, "wait_for_auth"):
+            approved = await event.wait_for_auth(
+                action_type="FILE_MODIFY",
+                target_path=path,
+                description=f"精确替换文件内容。",
+                tool_name="replace_content",
+                diff_preview=f"OLD:\n{old_content}\n\nNEW:\n{new_content}"
+            )
+            if not approved:
+                return "Error: User rejected the file modification."
+
         from .native_tools import replace_content
         return replace_content(path, old_content, new_content)
 
@@ -203,10 +257,11 @@ class LumiHubAdapter(Platform):
         self.ws_server = LumiWSServer(host=ws_host, port=ws_port)
         self.ws_server.on_message(self._handle_client_message)
 
-        # 初始化数据库管理器，数据存放在插件目录下的 data 文件夹
+        # 初始化数据库管理器，数据存放在项目根目录下的 data 文件夹
         import os
-        current_dir = os.path.dirname(os.path.abspath(__file__))
-        data_dir = os.path.join(current_dir, "data")
+        host_dir = os.path.dirname(os.path.abspath(__file__))
+        project_root = os.path.dirname(host_dir)
+        data_dir = os.path.join(project_root, "data")
         self.db = DatabaseManager(data_dir=data_dir)
         
         # 记录已验证的 websocket session -> user_id

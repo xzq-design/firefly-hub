@@ -157,3 +157,52 @@ class LumiMessageEvent(AstrMessageEvent):
 
         logger.info(f"[Lumi-Hub] 流式回复完成 (session={self._ws_session_id}): {full_text[:80]}...")
         await super().send_streaming(generator, use_fallback)
+
+    async def wait_for_auth(self, action_type: str, target_path: str, description: str, tool_name: str = "", diff_preview: str = "") -> bool:
+        """
+        向客户端发送 AUTH_REQUIRED 并等待 AUTH_RESPONSE。
+        返回 True 表示已获批准，False 表示拒绝或超时。
+        """
+        if not self._ws_server or not self._ws_session_id:
+            logger.error("[Lumi-Hub] 无法申请审批：未连接到 WebSocket")
+            return False
+
+        auth_msg_id = f"auth-{str(uuid.uuid4())[:8]}"
+        
+        auth_req = {
+            "message_id": auth_msg_id,
+            "type": "AUTH_REQUIRED",
+            "source": "host",
+            "target": "client",
+            "timestamp": int(time.time() * 1000),
+            "payload": {
+                "task_id": auth_msg_id, # 这里 task_id 和 message_id 保持一致，方便追踪
+                "action_type": action_type,
+                "risk_level": "HIGH",
+                "target_path": target_path,
+                "description": description,
+                "tool_name": tool_name,
+                "diff_preview": diff_preview,
+                "timeout_seconds": 60
+            }
+        }
+
+        logger.info(f"[Lumi-Hub] 已发送审批请求 ({action_type}): {target_path}")
+        await self._ws_server.send_to_client(self._ws_session_id, auth_req)
+
+        # 进入异步等待
+        resp = await self._ws_server.wait_for_response(self._ws_session_id, auth_msg_id, timeout=60)
+        
+        if not resp:
+            logger.warning(f"[Lumi-Hub] 审批超时或无响应: {action_type}")
+            return False
+            
+        payload = resp.get("payload", {})
+        decision = payload.get("decision", "REJECTED")
+        
+        if decision == "APPROVED":
+            logger.info(f"[Lumi-Hub] 用户已批准操作: {action_type}")
+            return True
+        else:
+            logger.warning(f"[Lumi-Hub] 用户拒绝了操作: {action_type}")
+            return False

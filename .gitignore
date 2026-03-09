@@ -1,8 +1,26 @@
-# 忽略所有 .md 文件
-*.md
-
-# 排除 README.md (不忽略它)
-!README.md
-
+# 数据与缓存
 /data/
+/host/data/
 .Lumi_cache/
+
+# Python 垃圾
+__pycache__/
+*.pyc
+.venv/
+venv/
+.env
+
+# Flutter 编译产物
+/client/build/
+/client/.dart_tool/
+/client/.flutter-plugins
+/client/.flutter-plugins-dependencies
+
+# IDE 与系统
+.vscode/
+.idea/
+.DS_Store
+
+# 允许文档
+!README.md
+!docs/

@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
@@ -10,6 +11,7 @@ import '../models/message.dart';
 import '../services/app_settings.dart';
 import '../services/ws_service.dart';
 import '../theme/app_theme.dart';
+import 'components/approval_dialog.dart';
 
 class ChatScreen extends StatefulWidget {
   const ChatScreen({super.key});
@@ -25,9 +27,38 @@ class _ChatScreenState extends State<ChatScreen> {
 
   bool _isSelectionMode = false;
   final Set<String> _selectedMessageIds = {};
+  StreamSubscription? _authSubscription;
+
+  @override
+  void initState() {
+    super.initState();
+    // 监听审批请求
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      final ws = context.read<WsService>();
+      _authSubscription = ws.authRequests.listen(_handleAuthRequest);
+    });
+  }
+
+  void _handleAuthRequest(Map<String, dynamic> request) {
+    if (!mounted) return;
+
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => ApprovalDialog(
+        authRequest: request,
+        onDecision: (decision) {
+          final ws = context.read<WsService>();
+          ws.sendAuthResponse(request['message_id'], decision);
+          Navigator.pop(context);
+        },
+      ),
+    );
+  }
 
   @override
   void dispose() {
+    _authSubscription?.cancel();
     _input.dispose();
     _scroll.dispose();
     _focusNode.dispose();

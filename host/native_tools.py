@@ -1,6 +1,9 @@
 import os
 import shutil
 import time
+import logging
+
+logger = logging.getLogger("astrbot")
 
 def read_file(path: str, start_line: int = 1, end_line: int = None) -> str:
     """读取本地文件内容，支持指定行范围。"""
@@ -36,18 +39,26 @@ def read_file(path: str, start_line: int = 1, end_line: int = None) -> str:
         return f"Error reading file: {e}"
 
 def backup_file(path: str) -> bool:
-    """修改文件前备份"""
+    """修改文件前备份。失败时记录错误并返回 False。"""
     try:
-        if not os.path.exists(path): 
+        if not os.path.exists(path):
             return False
-        cache_dir = ".Lumi_cache"
+        
+        # 获取绝对路径以避免 CWD 变化导致的路径问题
+        abs_path = os.path.abspath(path)
+        base_dir = os.path.dirname(abs_path)
+        cache_dir = os.path.join(base_dir, ".Lumi_cache")
+        
         os.makedirs(cache_dir, exist_ok=True)
-        filename = os.path.basename(path)
+        filename = os.path.basename(abs_path)
         timestamp = int(time.time())
         backup_path = os.path.join(cache_dir, f"{filename}.{timestamp}.bak")
-        shutil.copy2(path, backup_path)
+        
+        shutil.copy2(abs_path, backup_path)
+        logger.info(f"[Lumi-Hub] 备份成功: {abs_path} -> {backup_path}")
         return True
-    except Exception:
+    except Exception as e:
+        logger.error(f"[Lumi-Hub] 备份失败! 路径: {path}, 错误: {str(e)}")
         return False
 
 def list_dir(path: str) -> str:
@@ -73,7 +84,10 @@ def list_dir(path: str) -> str:
 def write_file(path: str, content: str) -> str:
     """写入文件内容 (会先进行安全备份)"""
     try:
-        backup_file(path)
+        if os.path.exists(path):
+            if not backup_file(path):
+                return f"Error: Failed to backup {path}. Operation aborted for safety."
+        
         with open(path, 'w', encoding='utf-8') as f:
             f.write(content)
         return f"Successfully wrote to {path}"
@@ -85,7 +99,10 @@ def delete_file(path: str) -> str:
     try:
         if not os.path.exists(path):
             return f"Error: File '{path}' does not exist."
-        backup_file(path)
+        
+        if not backup_file(path):
+            return f"Error: Failed to backup {path}. Deletion aborted for safety."
+            
         os.remove(path)
         return f"Successfully deleted {path} (backup created in .Lumi_cache)"
     except Exception as e:
@@ -107,7 +124,9 @@ def replace_content(path: str, old_content: str, new_content: str) -> str:
         if count > 1:
             return f"Error: Found {count} occurrences of the target content. Please provide a more unique snippet to replace."
         
-        backup_file(path)
+        if not backup_file(path):
+            return f"Error: Failed to backup {path}. Modification aborted for safety."
+            
         updated_text = text.replace(old_content, new_content)
         
         with open(path, 'w', encoding='utf-8') as f:
@@ -133,7 +152,9 @@ def insert_content(path: str, line_number: int, content: str) -> str:
         else:
             lines.insert(idx, content + "\n")
             
-        backup_file(path)
+        if not backup_file(path):
+            return f"Error: Failed to backup {path}. Insertion aborted for safety."
+            
         with open(path, 'w', encoding='utf-8') as f:
             f.writelines(lines)
             
@@ -174,7 +195,9 @@ def search_replace(path: str, search_block: str, replace_block: str) -> str:
         
         new_lines = lines[:match_start] + replace_block.splitlines() + lines[match_start + len(search_lines):]
         
-        backup_file(path)
+        if not backup_file(path):
+            return f"Error: Failed to backup {path}. Modification aborted for safety."
+            
         with open(path, 'w', encoding='utf-8', newline='\n') as f:
             f.write("\n".join(new_lines) + "\n")
             

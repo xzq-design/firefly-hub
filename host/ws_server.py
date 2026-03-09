@@ -24,6 +24,8 @@ class LumiWSServer:
         self.clients: Dict[str, WebSocketServerProtocol] = {}  # session_id -> ws
         self.server: Optional[websockets.WebSocketServer] = None
         self._message_handler: Optional[Callable[[dict, str], Awaitable[None]]] = None
+        # 用于等待特定消息 ID 的响应: (session_id, message_id) -> Future
+        self._pending_responses: Dict[tuple[str, str], asyncio.Future] = {}
 
     def on_message(self, handler: Callable[[dict, str], Awaitable[None]]):
         """注册消息处理回调。handler(message_dict, session_id)"""
@@ -55,6 +57,21 @@ class LumiWSServer:
                 await ws.send(json.dumps(message, ensure_ascii=False))
             except Exception as e:
                 logger.error(f"[Lumi-Hub] 发送消息失败 (session={session_id}): {e}")
+
+    async def wait_for_response(self, session_id: str, message_id: str, timeout: int = 30) -> Optional[dict]:
+        """异步等待某个消息 ID 的响应。"""
+        loop = asyncio.get_event_loop()
+        future = loop.create_future()
+        key = (session_id, message_id)
+        self._pending_responses[key] = future
+        
+        try:
+            return await asyncio.wait_for(future, timeout=timeout)
+        except asyncio.TimeoutError:
+            logger.warning(f"[Lumi-Hub] 等待响应超时 (session={session_id}, msg_id={message_id})")
+            return None
+        finally:
+            self._pending_responses.pop(key, None)
 
     async def broadcast(self, message: dict):
         """向所有已连接的 Client 广播消息。"""
@@ -95,6 +112,15 @@ class LumiWSServer:
     async def _dispatch_message(self, message: dict, session_id: str):
         """根据消息类型分发处理。"""
         msg_type = message.get("type", "")
+        msg_id = message.get("message_id", "")
+
+        # 检查是否是正在等待的响应 (通过让前端回传相同的 message_id 或在 payload 里包含 task_id)
+        # 根据 protocol.json, AUTH_RESPONSE 会包含相同的 message_id 或 payload.task_id
+        # 这里我们优先检查 message_id
+        key = (session_id, msg_id)
+        if key in self._pending_responses:
+            self._pending_responses[key].set_result(message)
+            return
 
         # 心跳处理
         if msg_type == "PING":

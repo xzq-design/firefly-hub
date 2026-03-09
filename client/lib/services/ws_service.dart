@@ -34,6 +34,12 @@ class WsService extends ChangeNotifier {
   Map<String, dynamic>? _user;
   Map<String, dynamic>? get user => _user;
 
+  // 审批请求流
+  final _authRequestController =
+      StreamController<Map<String, dynamic>>.broadcast();
+  Stream<Map<String, dynamic>> get authRequests =>
+      _authRequestController.stream;
+
   String get serverUrl => _defaultUrl;
 
   WsService() {
@@ -142,6 +148,8 @@ class WsService extends ChangeNotifier {
           debugPrint('[WS] 握手确认: ${data['payload']}');
         case 'AUTH_RESPONSE':
           _handleAuthResponse(data);
+        case 'AUTH_REQUIRED':
+          _handleAuthRequired(data);
         case 'HISTORY_RESPONSE':
           _handleHistoryResponse(data);
         default:
@@ -194,6 +202,11 @@ class WsService extends ChangeNotifier {
       debugPrint('[WS] Auth 失败: ${payload['message']}');
       await logout();
     }
+  }
+
+  void _handleAuthRequired(Map<String, dynamic> data) {
+    debugPrint('[WS] 收到审批请求: ${data['message_id']}');
+    _authRequestController.add(data);
   }
 
   void _handleHistoryResponse(Map<String, dynamic> data) {
@@ -250,6 +263,18 @@ class WsService extends ChangeNotifier {
       'source': 'client',
       'target': 'host',
       'payload': {'token': _token},
+    });
+  }
+
+  void sendAuthResponse(String taskId, String decision) {
+    if (_status != WsStatus.connected) return;
+    _send({
+      'message_id': taskId, // 必须回传相同的 message_id/task_id
+      'type': 'AUTH_RESPONSE',
+      'source': 'client',
+      'target': 'host',
+      'timestamp': DateTime.now().millisecondsSinceEpoch,
+      'payload': {'task_id': taskId, 'decision': decision, 'reason': ''},
     });
   }
 
@@ -353,6 +378,7 @@ class WsService extends ChangeNotifier {
   @override
   void dispose() {
     _disposed = true;
+    _authRequestController.close();
     disconnect();
     super.dispose();
   }
