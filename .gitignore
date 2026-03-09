@@ -2,7 +2,7 @@
 /data/
 /host/data/
 .Lumi_cache/
-.md
+*.md
 
 # Python 垃圾
 __pycache__/
