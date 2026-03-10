@@ -13,7 +13,7 @@ def read_file(path: str, start_line: int = 1, end_line: int = None) -> str:
         if not os.path.isfile(path):
             return f"Error: '{path}' is not a file."
         
-        with open(path, 'r', encoding='utf-8') as f:
+        with open(path, 'r', encoding='utf-8', errors='replace') as f:
             lines = f.readlines()
             
         total_lines = len(lines)

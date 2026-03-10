@@ -1,5 +1,5 @@
 import os
-from datetime import datetime
+from datetime import datetime, timezone
 from sqlalchemy import Column, Integer, String, DateTime, Text, ForeignKey, create_engine
 from sqlalchemy.orm import declarative_base, relationship, sessionmaker
 
@@ -11,7 +11,9 @@ class User(Base):
     id = Column(Integer, primary_key=True, autoincrement=True)
     username = Column(String(50), unique=True, nullable=False, index=True)
     password_hash = Column(String(128), nullable=False)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    # 安全随机 token，用于 WebSocket 会话恢复认证
+    token = Column(String(64), nullable=True, unique=True, index=True)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 
     # 关联用户的聊天记录
     messages = relationship("Message", back_populates="user", cascade="all, delete-orphan")
@@ -30,7 +32,7 @@ class Message(Base):
     content = Column(Text, nullable=False)
     # 消息类型，如 'chat', 'tool_result'
     type = Column(String(50), default='chat')
-    timestamp = Column(DateTime, default=datetime.utcnow, index=True)
+    timestamp = Column(DateTime, default=lambda: datetime.now(timezone.utc), index=True)
     
     # 防止多端同步时出现重复 id（如果有前端生成的 UUID 的话可以存这里，目前先作为可选）
     client_msg_id = Column(String(64), nullable=True, unique=True)

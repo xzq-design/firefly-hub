@@ -182,10 +182,11 @@ class WsService extends ChangeNotifier {
     final payload = data['payload'] as Map<String, dynamic>? ?? {};
     final status = payload['status'] as String?;
 
+    // 判断这次是不是自动恢复登录（isRestoringAuth 在发 AUTH_RESTORE 前被置 true）
+    final wasRestoring = isRestoringAuth;
     isRestoringAuth = false;
 
     if (status == 'success') {
-      _isAuthenticated = true;
       _token = payload['token'] as String?;
       _user = payload['user'] as Map<String, dynamic>?;
 
@@ -193,10 +194,16 @@ class WsService extends ChangeNotifier {
         final prefs = await SharedPreferences.getInstance();
         await prefs.setString('auth_token', _token!);
         debugPrint('[WS] Auth 成功，已保存 Token: $_token');
-
-        // 登录成功后拉取历史
-        requestHistory();
       }
+
+      // 自动恢复登录时加 1 秒延迟，避免直接闪跳到聊天页面
+      if (wasRestoring) {
+        await Future.delayed(const Duration(milliseconds: 1000));
+      }
+
+      _isAuthenticated = true;
+      // 登录成功后拉取历史
+      requestHistory();
       notifyListeners();
     } else {
       debugPrint('[WS] Auth 失败: ${payload['message']}');
@@ -219,7 +226,7 @@ class WsService extends ChangeNotifier {
       final isMe = msg['role'] == 'user';
       _messages.add(
         ChatMessage(
-          id: msg['id']?.toString() ?? msg['client_msg_id'] ?? _genId(),
+          id: msg['message_id']?.toString() ?? _genId(),
           content: msg['content'] as String? ?? '',
           sender: isMe ? MessageSender.me : MessageSender.ai,
           time: DateTime.fromMillisecondsSinceEpoch(

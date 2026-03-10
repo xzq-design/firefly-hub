@@ -82,7 +82,7 @@ class LumiMessageEvent(AstrMessageEvent):
         if self._db and self._user_id:
             self._db.save_message(user_id=self._user_id, role="assistant", content=text)
 
-        logger.info(f"[Lumi-Hub] 发送 LLM 回复 (session={self._ws_session_id}): {text[:80]}...")
+        logger.info(f"[Lumi-Hub] 发送 LLM 回复 (session={self._ws_session_id}): {text[:80]}{'...' if len(text) > 80 else ''}") 
         await self._ws_server.send_to_client(self._ws_session_id, response)
         await super().send(MessageChain([]))
 
@@ -156,7 +156,12 @@ class LumiMessageEvent(AstrMessageEvent):
         await self._ws_server.send_to_client(self._ws_session_id, final_msg)
 
         logger.info(f"[Lumi-Hub] 流式回复完成 (session={self._ws_session_id}): {full_text[:80]}...")
-        await super().send_streaming(generator, use_fallback)
+        # 生成器已在上方的 async for 循环中耗尽，不能再传给父类。
+        # 此处传一个空的异步生成器以满足父类接口要求。
+        async def _empty_gen():
+            return
+            yield  # noqa: make this an async generator
+        await super().send_streaming(_empty_gen(), use_fallback)
 
     async def wait_for_auth(self, action_type: str, target_path: str, description: str, tool_name: str = "", diff_preview: str = "") -> bool:
         """

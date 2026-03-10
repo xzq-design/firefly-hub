@@ -259,7 +259,7 @@ class LumiHubAdapter(Platform):
 
         # 初始化数据库管理器，数据存放在项目根目录下的 data 文件夹
         import os
-        host_dir = os.path.dirname(os.path.abspath(__file__))
+        host_dir = os.path.dirname(os.path.realpath(__file__))
         project_root = os.path.dirname(host_dir)
         data_dir = os.path.join(project_root, "data")
         self.db = DatabaseManager(data_dir=data_dir)
@@ -377,9 +377,16 @@ class LumiHubAdapter(Platform):
         payload = message.get("payload", {})
         username = payload.get("username", "")
         password = payload.get("password", "")
-        
-        result = self.db.create_user(username, password)
         msg_id = message.get("message_id", str(uuid.uuid4())[:8])
+        try:
+            result = self.db.create_user(username, password)
+        except Exception as e:
+            logger.error(f"[Lumi-Hub] 注册时数据库异常: {e}")
+            await self.ws_server.send_to_client(ws_session_id, {
+                "message_id": msg_id, "type": "AUTH_RESPONSE", "source": "host", "target": "client",
+                "payload": {"status": "error", "message": f"Server error: {e}"}
+            })
+            return
         
         if "error" in result:
             await self.ws_server.send_to_client(ws_session_id, {
@@ -391,7 +398,7 @@ class LumiHubAdapter(Platform):
             self.active_sessions[ws_session_id] = result["id"]
             await self.ws_server.send_to_client(ws_session_id, {
                 "message_id": msg_id, "type": "AUTH_RESPONSE", "source": "host", "target": "client",
-                "payload": {"status": "success", "user": {"id": result["id"], "username": result["username"]}, "token": str(result["id"])}
+                "payload": {"status": "success", "user": {"id": result["id"], "username": result["username"]}, "token": result.get("token", "")}
             })
             logger.info(f"[Lumi-Hub] 用户注册并登录成功: {username}")
 
@@ -399,9 +406,16 @@ class LumiHubAdapter(Platform):
         payload = message.get("payload", {})
         username = payload.get("username", "")
         password = payload.get("password", "")
-        
-        result = self.db.verify_user(username, password)
         msg_id = message.get("message_id", str(uuid.uuid4())[:8])
+        try:
+            result = self.db.verify_user(username, password)
+        except Exception as e:
+            logger.error(f"[Lumi-Hub] 登录时数据库异常: {e}")
+            await self.ws_server.send_to_client(ws_session_id, {
+                "message_id": msg_id, "type": "AUTH_RESPONSE", "source": "host", "target": "client",
+                "payload": {"status": "error", "message": f"Server error: {e}"}
+            })
+            return
         
         if "error" in result:
             await self.ws_server.send_to_client(ws_session_id, {
@@ -412,7 +426,7 @@ class LumiHubAdapter(Platform):
             self.active_sessions[ws_session_id] = result["id"]
             await self.ws_server.send_to_client(ws_session_id, {
                 "message_id": msg_id, "type": "AUTH_RESPONSE", "source": "host", "target": "client",
-                "payload": {"status": "success", "user": {"id": result["id"], "username": result["username"]}, "token": str(result["id"])}
+                "payload": {"status": "success", "user": {"id": result["id"], "username": result["username"]}, "token": result.get("token", "")}
             })
             logger.info(f"[Lumi-Hub] 用户登录成功: {username}")
 
@@ -424,25 +438,18 @@ class LumiHubAdapter(Platform):
         if not token:
             return
 
-        try:
-            user_id = int(token)
-            user = self.db.get_user_by_id(user_id)
-            if user:
-                self.active_sessions[ws_session_id] = user_id
-                await self.ws_server.send_to_client(ws_session_id, {
-                    "message_id": msg_id, "type": "AUTH_RESPONSE", "source": "host", "target": "client",
-                    "payload": {"status": "success", "user": user, "token": token}
-                })
-                logger.info(f"[Lumi-Hub] 用户通过 Token 恢复会话成功: {user['username']}")
-            else:
-                await self.ws_server.send_to_client(ws_session_id, {
-                    "message_id": msg_id, "type": "AUTH_RESPONSE", "source": "host", "target": "client",
-                    "payload": {"status": "error", "message": "Invalid token"}
-                })
-        except ValueError:
+        user = self.db.get_user_by_token(token)
+        if user:
+            self.active_sessions[ws_session_id] = user["id"]
             await self.ws_server.send_to_client(ws_session_id, {
                 "message_id": msg_id, "type": "AUTH_RESPONSE", "source": "host", "target": "client",
-                "payload": {"status": "error", "message": "Malformed token"}
+                "payload": {"status": "success", "user": user, "token": token}
+            })
+            logger.info(f"[Lumi-Hub] 用户通过 Token 恢复会话成功: {user['username']}")
+        else:
+            await self.ws_server.send_to_client(ws_session_id, {
+                "message_id": msg_id, "type": "AUTH_RESPONSE", "source": "host", "target": "client",
+                "payload": {"status": "error", "message": "Invalid or expired token"}
             })
 
     async def _handle_history_request(self, message: dict, ws_session_id: str) -> None:

@@ -1,7 +1,9 @@
 import os
+import secrets
 import logging
 import hashlib
 import datetime
+from datetime import timezone
 from sqlalchemy.orm import sessionmaker
 
 from .models import init_db, User, Message
@@ -35,7 +37,8 @@ class DatabaseManager:
                 return {"error": "Username already exists"}
             
             hashed_pwd = self.get_password_hash(password)
-            new_user = User(username=username, password_hash=hashed_pwd)
+            new_token = secrets.token_hex(32)
+            new_user = User(username=username, password_hash=hashed_pwd, token=new_token)
             session.add(new_user)
             session.commit()
             session.refresh(new_user)
@@ -43,25 +46,33 @@ class DatabaseManager:
             return {
                 "id": new_user.id,
                 "username": new_user.username,
+                "token": new_user.token,
                 "created_at": new_user.created_at.isoformat()
             }
 
     def verify_user(self, username: str, password: str) -> dict:
-        """验证用户登录。成功返回用户信息，失败返回 error。"""
+        """验证用户登录。成功返回用户信息（含新 token），失败返回 error。"""
         with self.SessionLocal() as session:
             user = session.query(User).filter(User.username == username).first()
             if not user or not self.verify_password(password, user.password_hash):
                 return {"error": "Invalid username or password"}
+            
+            # 每次登录刷新 token，使旧 token 立即失效
+            user.token = secrets.token_hex(32)
+            session.commit()
+            session.refresh(user)
                 
             return {
                 "id": user.id,
                 "username": user.username,
+                "token": user.token,
                 "created_at": user.created_at.isoformat()
             }
             
-    def get_user_by_id(self, user_id: int):
+    def get_user_by_token(self, token: str):
+        """通过 token 查找用户（用于 AUTH_RESTORE）。"""
         with self.SessionLocal() as session:
-            user = session.query(User).filter(User.id == user_id).first()
+            user = session.query(User).filter(User.token == token).first()
             if user:
                 return {"id": user.id, "username": user.username}
             return None
@@ -87,7 +98,7 @@ class DatabaseManager:
                 "role": msg.role,
                 "content": msg.content,
                 "type": msg.type,
-                "timestamp": int(msg.timestamp.replace(tzinfo=datetime.timezone.utc).timestamp() * 1000)
+                "timestamp": int(msg.timestamp.replace(tzinfo=timezone.utc).timestamp() * 1000)
             }
 
     def get_messages(self, user_id: int, limit: int = 50, offset: int = 0) -> list:
@@ -109,6 +120,6 @@ class DatabaseManager:
                     "role": msg.role,
                     "content": msg.content,
                     "type": msg.type,
-                    "timestamp": int(msg.timestamp.replace(tzinfo=datetime.timezone.utc).timestamp() * 1000)
+                    "timestamp": int(msg.timestamp.replace(tzinfo=timezone.utc).timestamp() * 1000)
                 })
             return result

@@ -60,8 +60,7 @@ class LumiWSServer:
 
     async def wait_for_response(self, session_id: str, message_id: str, timeout: int = 30) -> Optional[dict]:
         """异步等待某个消息 ID 的响应。"""
-        loop = asyncio.get_event_loop()
-        future = loop.create_future()
+        future = asyncio.get_running_loop().create_future()
         key = (session_id, message_id)
         self._pending_responses[key] = future
         
