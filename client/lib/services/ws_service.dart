@@ -34,6 +34,10 @@ class WsService extends ChangeNotifier {
   Map<String, dynamic>? _user;
   Map<String, dynamic>? get user => _user;
 
+  bool _isGenerating = false;
+  bool get isGenerating => _isGenerating;
+  Timer? _generationUnlockTimer;
+
   // 审批请求流
   final _authRequestController =
       StreamController<Map<String, dynamic>>.broadcast();
@@ -45,6 +49,18 @@ class WsService extends ChangeNotifier {
       StreamController<Map<String, dynamic>>.broadcast();
   Stream<Map<String, dynamic>> get mcpConfigResponses =>
       _mcpConfigController.stream;
+
+  // 人格列表 & 当前激活人格
+  List<Map<String, dynamic>> _personas = [];
+  List<Map<String, dynamic>> get personas => List.unmodifiable(_personas);
+  String _activePersonaId = '';
+  String get activePersonaId => _activePersonaId;
+
+  // 人格操作响应流
+  final _personaController =
+      StreamController<Map<String, dynamic>>.broadcast();
+  Stream<Map<String, dynamic>> get personaResponses =>
+      _personaController.stream;
 
   String get serverUrl => _defaultUrl;
 
@@ -124,6 +140,8 @@ class WsService extends ChangeNotifier {
       isTyping: true,
     );
     _messages.add(placeholder);
+    _isGenerating = true;
+    _generationUnlockTimer?.cancel();
     notifyListeners();
 
     // 发送到 Host
@@ -133,7 +151,11 @@ class WsService extends ChangeNotifier {
       'source': 'client',
       'target': 'host',
       'timestamp': DateTime.now().millisecondsSinceEpoch,
-      'payload': {'content': text, 'context_id': 'default'},
+      'payload': {
+        'content': text, 
+        'context_id': 'default',
+        'persona_id': _activePersonaId,
+      },
     });
   }
 
@@ -147,6 +169,10 @@ class WsService extends ChangeNotifier {
       switch (type) {
         case 'CHAT_RESPONSE':
           _handleChatResponse(data);
+        case 'CHAT_RESPONSE_END':
+          _isGenerating = false;
+          _generationUnlockTimer?.cancel();
+          notifyListeners();
         case 'PONG':
           // 心跳回应，忽略
           break;
@@ -161,6 +187,12 @@ class WsService extends ChangeNotifier {
         case 'MCP_CONFIG_RESPONSE':
         case 'MCP_CONFIG_UPDATE_RESPONSE':
           _mcpConfigController.add(data);
+        case 'PERSONA_LIST':
+          _handlePersonaList(data);
+        case 'PERSONA_SWITCH':
+        case 'PERSONA_CLEAR_HISTORY_RESPONSE':
+        case 'PERSONA_DELETE_RESPONSE':
+          _personaController.add(data);
         default:
           debugPrint('[WS] 未处理消息类型: $type');
       }
@@ -184,6 +216,7 @@ class WsService extends ChangeNotifier {
         time: DateTime.now(),
       ),
     );
+    
     notifyListeners();
   }
 
@@ -211,8 +244,9 @@ class WsService extends ChangeNotifier {
       }
 
       _isAuthenticated = true;
-      // 登录成功后拉取历史
+      // 登录成功后拉取历史 & 人格列表
       requestHistory();
+      requestPersonaList();
       notifyListeners();
     } else {
       debugPrint('[WS] Auth 失败: ${payload['message']}');
@@ -243,6 +277,19 @@ class WsService extends ChangeNotifier {
           ),
         ),
       );
+    }
+    notifyListeners();
+  }
+
+  void _handlePersonaList(Map<String, dynamic> data) {
+    final payload = data['payload'] as Map<String, dynamic>? ?? {};
+    final list = payload['personas'] as List<dynamic>? ?? [];
+    _personas = list
+        .map((p) => Map<String, dynamic>.from(p as Map))
+        .toList();
+    // 初始化激活人格（取第一个，或保持现有）
+    if (_activePersonaId.isEmpty && _personas.isNotEmpty) {
+      _activePersonaId = _personas.first['id'] as String? ?? '';
     }
     notifyListeners();
   }
@@ -301,7 +348,59 @@ class WsService extends ChangeNotifier {
       'type': 'HISTORY_REQUEST',
       'source': 'client',
       'target': 'host',
-      'payload': {'limit': limit, 'offset': offset},
+      'payload': {
+        'limit': limit, 
+        'offset': offset,
+        'persona_id': _activePersonaId,
+      },
+    });
+  }
+
+  void requestPersonaList() {
+    if (_status != WsStatus.connected || !_isAuthenticated) return;
+    _send({
+      'message_id': _genId(),
+      'type': 'PERSONA_LIST',
+      'source': 'client',
+      'target': 'host',
+      'payload': {},
+    });
+  }
+
+  void switchPersona(String personaId) {
+    if (_status != WsStatus.connected) return;
+    _activePersonaId = personaId;
+    _messages.clear();
+    notifyListeners();
+    _send({
+      'message_id': _genId(),
+      'type': 'PERSONA_SWITCH',
+      'source': 'client',
+      'target': 'host',
+      'payload': {'persona_id': personaId},
+    });
+    requestHistory();
+  }
+
+  void clearPersonaHistory() {
+    if (_status != WsStatus.connected || !_isAuthenticated) return;
+    _send({
+      'message_id': _genId(),
+      'type': 'PERSONA_CLEAR_HISTORY',
+      'source': 'client',
+      'target': 'host',
+      'payload': {'persona_id': _activePersonaId},
+    });
+  }
+
+  void deletePersona(String personaId) {
+    if (_status != WsStatus.connected) return;
+    _send({
+      'message_id': _genId(),
+      'type': 'PERSONA_DELETE',
+      'source': 'client',
+      'target': 'host',
+      'payload': {'persona_id': personaId},
     });
   }
 
@@ -344,6 +443,12 @@ class WsService extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// 清空本地消息列表（配合清空历史记录使用）
+  void clearLocalMessages() {
+    _messages.clear();
+    notifyListeners();
+  }
+
   void _onError(Object error) {
     debugPrint('[WS] 错误: $error');
     _handleDisconnect();
@@ -357,6 +462,8 @@ class WsService extends ChangeNotifier {
   void _handleDisconnect() {
     // 清除 typing 占位
     _messages.removeWhere((m) => m.isTyping);
+    _isGenerating = false;
+    _generationUnlockTimer?.cancel();
     _pingTimer?.cancel();
     _setStatus(WsStatus.disconnected);
     _scheduleReconnect();
@@ -418,6 +525,7 @@ class WsService extends ChangeNotifier {
     _disposed = true;
     _authRequestController.close();
     _mcpConfigController.close();
+    _personaController.close();
     disconnect();
     super.dispose();
   }

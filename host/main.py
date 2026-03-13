@@ -36,7 +36,9 @@ logger = logging.getLogger("lumi_hub")
 
 
 from astrbot.api.event import filter, AstrMessageEvent
-from astrbot.api.star import register
+from astrbot.api.star import register, Context
+import time
+import uuid
 
 # 全局共享状态，用于跨类传递实例
 _lumi_shared_state = {}
@@ -63,6 +65,7 @@ class LumiHub(Star):
             
             # Inject into global state so LumiHubAdapter can access it
             _lumi_shared_state["mcp_manager"] = self.mcp_manager
+            _lumi_shared_state["persona_manager"] = pm
             
             mcp_tools = await self.mcp_manager.get_all_tools()
             mcp_prompt = ""
@@ -381,14 +384,17 @@ class LumiHubAdapter(Platform):
     ) -> None:
         """通过会话发送主动消息（插件主动推送）。"""
         # 从 session_id 中提取 user_id 和 context_id
-        # 格式: lumi_hub!{user_id}!{context_id}
+        # 格式: lumi_hub!{user_id}!{context_id}!{persona_id}
         parts = session.session_id.split("!")
         user_id = None
+        persona_id = "default"
         if len(parts) >= 3:
             try:
                 user_id = int(parts[1])
             except ValueError:
                 pass
+        if len(parts) >= 4:
+            persona_id = parts[3]
 
         text_parts = []
         for comp in message_chain.chain:
@@ -399,7 +405,7 @@ class LumiHubAdapter(Platform):
 
         if content_str and user_id is not None:
             # 存入数据库 (无论用户是否在线、连接是否存在都可以保存)
-            self.db.save_message(user_id=user_id, role="assistant", content=content_str)
+            self.db.save_message(user_id=user_id, role="assistant", content=content_str, persona_id=persona_id)
             
             # 查找所有关联到该 user_id 的 ws_session_id 并分发
             target_ws_ids = [ws_id for ws_id, uid in self.active_sessions.items() if uid == user_id]
@@ -413,7 +419,7 @@ class LumiHubAdapter(Platform):
                     "payload": {
                         "content": content_str,
                         "status": "success",
-                        "persona": "default",
+                        "persona": persona_id,
                     },
                 }
                 await self.ws_server.send_to_client(ws_id, msg)
@@ -444,6 +450,10 @@ class LumiHubAdapter(Platform):
             await self._handle_mcp_config_get(message, ws_session_id)
         elif msg_type == "MCP_CONFIG_UPDATE":
             await self._handle_mcp_config_update(message, ws_session_id)
+        elif msg_type == "PERSONA_CLEAR_HISTORY":
+            await self._handle_persona_clear_history(message, ws_session_id)
+        elif msg_type == "PERSONA_DELETE":
+            await self._handle_persona_delete(message, ws_session_id)
         else:
             logger.warning(f"[Lumi-Hub] 未知消息类型: {msg_type}")
 
@@ -583,8 +593,9 @@ class LumiHubAdapter(Platform):
         payload = message.get("payload", {})
         limit = payload.get("limit", 50)
         offset = payload.get("offset", 0)
+        persona_id = payload.get("persona_id", "default")
         
-        messages = self.db.get_messages(user_id=user_id, limit=limit, offset=offset)
+        messages = self.db.get_messages(user_id=user_id, persona_id=persona_id, limit=limit, offset=offset)
         
         await self.ws_server.send_to_client(ws_session_id, {
             "message_id": msg_id,
@@ -598,6 +609,43 @@ class LumiHubAdapter(Platform):
             }
         })
 
+    @filter.llm_tool(name="call_mcp_tool")
+    async def call_mcp_tool(self, event: AstrMessageEvent, server_name: str, tool_name: str, arguments_json: str):
+        '''调用外部 MCP Server 提供的工具。
+        Args:
+            server_name(string): 目标 MCP Server 的名称
+            tool_name(string): 要调用的工具名称
+            arguments_json(string): 传递给工具的参数，必须是合法的 JSON 字符串
+        '''
+        try:
+            arguments = json.loads(arguments_json)
+        except json.JSONDecodeError:
+            return "Error: arguments_json is not a valid JSON string."
+            
+        if hasattr(event, "wait_for_auth"):
+            approved = await event.wait_for_auth(
+                action_type="MCP_TOOL_CALL",
+                target_path=f"[{server_name}] {tool_name}",
+                description=f"调用外部 MCP 工具: {tool_name}",
+                tool_name="call_mcp_tool",
+                diff_preview=json.dumps(arguments, indent=2, ensure_ascii=False)
+            )
+            if not approved:
+                return "Error: User rejected the MCP tool call."
+                
+        if not hasattr(self, "mcp_manager"):
+            return "Error: MCP Manager not initialized."
+            
+        try:
+            res = await self.mcp_manager.call_tool(server_name, tool_name, arguments)
+        except Exception as e:
+            return f"Error calling MCP tool: {e}"
+            
+        try:
+            return json.dumps(res, ensure_ascii=False)
+        except Exception as e:
+            return f"Error executing tool: {e}"
+
     async def _handle_chat_request(self, message: dict, ws_session_id: str) -> None:
         """
         处理 CHAT_REQUEST：
@@ -610,8 +658,9 @@ class LumiHubAdapter(Platform):
         user_content = payload.get("content", "")
         msg_id = message.get("message_id", str(uuid.uuid4())[:8])
         context_id = payload.get("context_id", ws_session_id)
+        persona_id = payload.get("persona_id", "default")
 
-        logger.info(f"[Lumi-Hub] 收到消息 (session={ws_session_id}): {user_content}")
+        logger.info(f"[Lumi-Hub] 收到消息 (session={ws_session_id}, persona={persona_id}): {user_content}")
 
         # 鉴权校验
         user_id = self.active_sessions.get(ws_session_id)
@@ -624,7 +673,15 @@ class LumiHubAdapter(Platform):
             return
 
         # 异步存入数据库
-        self.db.save_message(user_id=user_id, role="user", content=user_content, client_msg_id=msg_id)
+        self.db.save_message(user_id=user_id, role="user", content=user_content, client_msg_id=msg_id, persona_id=persona_id)
+        
+        # 确保 AstrBot 当前的默认人格是用户正在对话的人格
+        pm = _lumi_shared_state.get("persona_manager")
+        if pm:
+            try:
+                pm.default_persona = persona_id
+            except Exception as e:
+                logger.error(f"[Lumi-Hub] 同步人格状态失败: {e}")
 
         # 1. 构造 AstrBotMessage（和 WebChatAdapter 做法一致）
         abm = AstrBotMessage()
@@ -632,8 +689,8 @@ class LumiHubAdapter(Platform):
         # 使用绑定的真实账号 user_id 而不是动态 session_id 作为识别，让大模型持久记忆用户
         abm.sender = MessageMember(user_id=str(user_id), nickname=f"User_{user_id}")
         abm.type = MessageType.FRIEND_MESSAGE
-        # SessionID 格式: lumi_hub!user_id!context_id，这样 AstrBot 的会话上下文将完全跟着账号走
-        abm.session_id = f"lumi_hub!{user_id}!{context_id}"
+        # SessionID 格式: lumi_hub!user_id!context_id!persona_id
+        abm.session_id = f"lumi_hub!{user_id}!{context_id}!{persona_id}"
         abm.message_id = msg_id
         abm.message = [Plain(user_content)]
         abm.message_str = user_content
@@ -650,32 +707,139 @@ class LumiHubAdapter(Platform):
             ws_session_id=ws_session_id,
             db=self.db,
             user_id=user_id,
+            persona_id=persona_id,
         )
 
         # 3. 注入 AstrBot 事件队列（EventBus 会自动 handle、调 LLM、调 event.send()）
         self.commit_event(event)
         logger.info(f"[Lumi-Hub] 事件已提交到 AstrBot 队列 (msg_id={msg_id})")
 
+        # 4. 后台轮询跟踪该事件的生命周期，待其跑完整个 Pipeline 后发送 CHAT_RESPONSE_END 给客户端解锁UI
+        async def wait_for_event_completion():
+            # 阶段 A: 等待 EventBus 从 _event_queue 中读取并转移到 active_event_registry
+            while True:
+                if event not in self._event_queue._queue:
+                    break
+                await asyncio.sleep(0.1)
+                
+            # 给 Scheduler 注册事件留出一点点时间
+            await asyncio.sleep(0.2)
+            
+            # 阶段 B: 等待 PipelineScheduler 彻底释放该活跃事件
+            try:
+                from astrbot.core.utils.active_event_registry import active_event_registry
+                umo = event.unified_msg_origin
+                while True:
+                    active_events = active_event_registry._events.get(umo, set())
+                    if event not in active_events:
+                        break
+                    await asyncio.sleep(0.5)
+            except Exception as e:
+                logger.warning(f"[Lumi-Hub] 跟踪事件生命周期时出错: {e}，将立即解锁。")
+
+            # 阶段 C: 事件生命周期完全结束，发送解锁信号
+            logger.debug(f"[Lumi-Hub] 消息 (msg_id={msg_id}) 管道执行已彻底结束，发送 CHAT_RESPONSE_END")
+            try:
+                await self.ws_server.send_to_client(ws_session_id, {
+                    "message_id": msg_id,
+                    "type": "CHAT_RESPONSE_END",
+                    "source": "host",
+                    "target": "client",
+                    "timestamp": int(time.time() * 1000),
+                    "payload": {"status": "success"},
+                })
+            except Exception as e:
+                logger.error(f"[Lumi-Hub] 发送 CHAT_RESPONSE_END 失败: {e}")
+
+        asyncio.create_task(wait_for_event_completion())
+
     async def _handle_persona_switch(self, message: dict, ws_session_id: str) -> None:
-        """处理人格切换请求。"""
+        """处理人格切换请求：真实切换 AstrBot 的默认人格。"""
         payload = message.get("payload", {})
         persona_id = payload.get("persona_id", "default")
-        persona_name = payload.get("persona_name", "默认")
+        msg_id = message.get("message_id", str(uuid.uuid4())[:8])
 
-        logger.info(f"[Lumi-Hub] 切换人格: {persona_name} ({persona_id})")
+        pm = _lumi_shared_state.get("persona_manager")
+        if pm:
+            try:
+                pm.default_persona = persona_id
+                logger.info(f"[Lumi-Hub] 人格已切换至: {persona_id}")
+                status = "switched"
+            except Exception as e:
+                logger.error(f"[Lumi-Hub] 切换人格失败: {e}")
+                status = "error"
+        else:
+            logger.warning("[Lumi-Hub] persona_manager 未初始化，无法切换人格")
+            status = "error"
 
         await self.ws_server.send_to_client(ws_session_id, {
-            "message_id": message.get("message_id", str(uuid.uuid4())[:8]),
+            "message_id": msg_id,
             "type": "PERSONA_SWITCH",
             "source": "host",
             "target": "client",
             "timestamp": int(time.time() * 1000),
-            "payload": {
-                "persona_id": persona_id,
-                "persona_name": persona_name,
-                "status": "switched",
-            },
+            "payload": {"persona_id": persona_id, "status": status},
         })
+
+    async def _handle_persona_clear_history(self, message: dict, ws_session_id: str) -> None:
+        """清空当前登录用户的所有聊天记录。"""
+        msg_id = message.get("message_id", str(uuid.uuid4())[:8])
+        user_id = self.active_sessions.get(ws_session_id)
+        payload = message.get("payload", {})
+        persona_id = payload.get("persona_id", "default")
+        
+        if not user_id:
+            await self.ws_server.send_to_client(ws_session_id, {
+                "message_id": msg_id, "type": "PERSONA_CLEAR_HISTORY_RESPONSE",
+                "source": "host", "target": "client",
+                "payload": {"status": "error", "message": "未登录"}
+            })
+            return
+        try:
+            count = self.db.clear_messages(user_id, persona_id)
+            logger.info(f"[Lumi-Hub] 用户 {user_id} 对人格 {persona_id} 的聊天记录已清空，共 {count} 条")
+            await self.ws_server.send_to_client(ws_session_id, {
+                "message_id": msg_id, "type": "PERSONA_CLEAR_HISTORY_RESPONSE",
+                "source": "host", "target": "client",
+                "payload": {"status": "success", "deleted_count": count}
+            })
+        except Exception as e:
+            logger.error(f"[Lumi-Hub] 清空聊天记录失败: {e}")
+            await self.ws_server.send_to_client(ws_session_id, {
+                "message_id": msg_id, "type": "PERSONA_CLEAR_HISTORY_RESPONSE",
+                "source": "host", "target": "client",
+                "payload": {"status": "error", "message": str(e)}
+            })
+
+    async def _handle_persona_delete(self, message: dict, ws_session_id: str) -> None:
+        """从 AstrBot 中删除指定人格。"""
+        payload = message.get("payload", {})
+        persona_id = payload.get("persona_id", "")
+        msg_id = message.get("message_id", str(uuid.uuid4())[:8])
+
+        pm = _lumi_shared_state.get("persona_manager")
+        if pm and persona_id:
+            try:
+                await pm.delete_persona(persona_id)
+                logger.info(f"[Lumi-Hub] 人格 '{persona_id}' 已删除")
+                await self.ws_server.send_to_client(ws_session_id, {
+                    "message_id": msg_id, "type": "PERSONA_DELETE_RESPONSE",
+                    "source": "host", "target": "client",
+                    "payload": {"status": "success", "persona_id": persona_id}
+                })
+            except Exception as e:
+                logger.error(f"[Lumi-Hub] 删除人格 '{persona_id}' 失败: {e}")
+                await self.ws_server.send_to_client(ws_session_id, {
+                    "message_id": msg_id, "type": "PERSONA_DELETE_RESPONSE",
+                    "source": "host", "target": "client",
+                    "payload": {"status": "error", "message": str(e)}
+                })
+        else:
+            await self.ws_server.send_to_client(ws_session_id, {
+                "message_id": msg_id, "type": "PERSONA_DELETE_RESPONSE",
+                "source": "host", "target": "client",
+                "payload": {"status": "error", "message": "persona_manager 未初始化或 persona_id 为空"}
+            })
 
     async def _handle_persona_list(self, message: dict, ws_session_id: str) -> None:
         """返回 AstrBot 中已有的人格列表。"""

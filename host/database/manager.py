@@ -79,11 +79,12 @@ class DatabaseManager:
 
     # ===== 消息相关 =====
 
-    def save_message(self, user_id: int, role: str, content: str, msg_type: str = 'chat', client_msg_id: str = None) -> dict:
+    def save_message(self, user_id: int, role: str, content: str, msg_type: str = 'chat', client_msg_id: str = None, persona_id: str = 'default') -> dict:
         """保存单条消息记录"""
         with self.SessionLocal() as session:
             msg = Message(
                 user_id=user_id,
+                persona_id=persona_id,
                 role=role,
                 content=content,
                 type=msg_type,
@@ -101,11 +102,21 @@ class DatabaseManager:
                 "timestamp": int(msg.timestamp.replace(tzinfo=timezone.utc).timestamp() * 1000)
             }
 
-    def get_messages(self, user_id: int, limit: int = 50, offset: int = 0) -> list:
-        """倒序获取指定用户的历史消息，返回格式化后的列表"""
+    def clear_messages(self, user_id: int, persona_id: str = "default") -> int:
+        """删除指定用户的指定人格的全部聊天记录，返回被删除的条数。"""
+        with self.SessionLocal() as session:
+            query = session.query(Message).filter(Message.user_id == user_id, Message.persona_id == persona_id)
+            count = query.count()
+            query.delete()
+            session.commit()
+            logger.info(f"[Lumi-Hub DB] 已清空用户 {user_id} 对人格 {persona_id} 的 {count} 条聊天记录")
+            return count
+
+    def get_messages(self, user_id: int, persona_id: str = "default", limit: int = 50, offset: int = 0) -> list:
+        """倒序获取指定用户的特定人格的历史消息，返回格式化后的列表"""
         with self.SessionLocal() as session:
             # 按照时间降序获取（最新的在前面）
-            messages = session.query(Message).filter(Message.user_id == user_id)\
+            messages = session.query(Message).filter(Message.user_id == user_id, Message.persona_id == persona_id)\
                               .order_by(Message.timestamp.desc())\
                               .offset(offset).limit(limit).all()
             

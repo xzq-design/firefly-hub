@@ -34,6 +34,9 @@ class Message(Base):
     type = Column(String(50), default='chat')
     timestamp = Column(DateTime, default=lambda: datetime.now(timezone.utc), index=True)
     
+    # 人格隔离字段：记录这条消息是给哪个人格发的，或者是哪个人格回的
+    persona_id = Column(String(50), nullable=False, default="default", server_default="default", index=True)
+    
     # 防止多端同步时出现重复 id（如果有前端生成的 UUID 的话可以存这里，目前先作为可选）
     client_msg_id = Column(String(64), nullable=True, unique=True)
 

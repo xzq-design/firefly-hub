@@ -33,12 +33,14 @@ class LumiMessageEvent(AstrMessageEvent):
         ws_session_id: str = "",
         db=None,
         user_id: int = None,
+        persona_id: str = "default",
     ) -> None:
         super().__init__(message_str, message_obj, platform_meta, session_id)
         self._ws_server = ws_server
         self._ws_session_id = ws_session_id
         self._db = db
         self._user_id = user_id
+        self._persona_id = persona_id
 
     def _chain_to_text(self, chain: MessageChain) -> str:
         """将 MessageChain 转为纯文本。"""
@@ -75,12 +77,12 @@ class LumiMessageEvent(AstrMessageEvent):
             "payload": {
                 "content": text,
                 "status": "success",
-                "persona": "default",
+                "persona": self._persona_id,
             },
         }
 
         if self._db and self._user_id:
-            self._db.save_message(user_id=self._user_id, role="assistant", content=text)
+            self._db.save_message(user_id=self._user_id, role="assistant", content=text, persona_id=self._persona_id)
 
         logger.info(f"[Lumi-Hub] 发送 LLM 回复 (session={self._ws_session_id}): {text[:80]}{'...' if len(text) > 80 else ''}") 
         await self._ws_server.send_to_client(self._ws_session_id, response)
@@ -146,12 +148,12 @@ class LumiMessageEvent(AstrMessageEvent):
             "payload": {
                 "content": full_text,
                 "status": "success",
-                "persona": "default",
+                "persona": self._persona_id,
             },
         }
         
         if self._db and self._user_id:
-            self._db.save_message(user_id=self._user_id, role="assistant", content=full_text)
+            self._db.save_message(user_id=self._user_id, role="assistant", content=full_text, persona_id=self._persona_id)
 
         await self._ws_server.send_to_client(self._ws_session_id, final_msg)
 
