@@ -1,5 +1,7 @@
 name: lumi_hub
-description: "Lumi-Hub 跨平台私有化 Agent 交互终端与消息路由中枢相关插件，负责对接astrbot。"
+display_name: "Lumi-Hub 交互终端"
+description: "Lumi-Hub 跨平台私有化 Agent 交互终端与消息路由中枢相关插件，负责对接 AstrBot。提供 WebSocket 通信桥梁，将 Flutter 客户端与 AstrBot LLM 引擎全链路打通，支持 MCP 工具接入与原生 Python 执行双轨制。"
 author: "Lumivers"
 version: "0.2.0"
-repo: "https://github.com/Lumivers/Lumi-Hub"
+repo: "https://github.com/Lumivers/Lumi-Hub-plugin"
+astrbot_version: ">=4.16"
